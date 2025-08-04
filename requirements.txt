@@ -5,3 +5,4 @@ matplotlib
 pandas-ta
 numpy
 tzdata
+setuptools
