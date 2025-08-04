@@ -1,7 +1,6 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-from pandas_datareader import data as pdr # ★Stooqからデータを取得するために追加
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import numpy as np
@@ -16,9 +15,8 @@ except RuntimeError:
     st.warning("日本語フォント（IPAGothic）が見つかりません。正しく表示されない可能性があります。")
 plt.rcParams['axes.unicode_minus'] = False
 
-
 # --- 日本市場の定義 ---
-JP_BENCHMARK_TICKER = '^TPX' # TOPIX
+JP_BENCHMARK_TICKER = '1306.T' # TOPIX連動ETF
 JP_SECTOR_TICKERS = [
     '1617.T', '1618.T', '1619.T', '1620.T', '1621.T', '1622.T', '1623.T', '1624.T',
     '1625.T', '1626.T', '1627.T', '1628.T', '1629.T', '1630.T', '1631.T', '1632.T', '1633.T'
@@ -26,7 +24,7 @@ JP_SECTOR_TICKERS = [
 JP_THEMATIC_TICKERS = ['1308.T', '1311.T', '1312.T', '2644.T', '1473.T', '1474.T']
 JP_ASSET_NAME_MAP = {
     # ベンチマーク
-    '^TPX': '【日】TOPIX (市場平均)',
+    '1306.T': '【日】TOPIX連動ETF (1306)',
     # セクター
     '1617.T': '【日】金融 (除く銀行)', '1618.T': '【日】銀行', '1619.T': '【日】建設・資材', '1620.T': '【日】鉄鋼・非鉄',
     '1621.T': '【日】食品', '1622.T': '【日】自動車・輸送機', '1623.T': '【日】エネルギー資源', '1624.T': '【日】商社・卸売',
@@ -41,13 +39,13 @@ JP_ASSET_NAME_MAP = {
     '1474.T': '【日】バリュー (TOPIX Value)'
 }
 
-# --- 米国市場の定義 ---
-US_BENCHMARK_TICKER = '^GSPC' # S&P 500
+# --- 米国市場の定義 (★ベンチマークをETFに変更) ---
+US_BENCHMARK_TICKER = 'SPY' # S&P 500連動ETF
 US_SECTOR_TICKERS = ['XLK', 'XLV', 'XLF', 'XLY', 'XLC', 'XLI', 'XLP', 'XLE', 'XLU', 'XLRE', 'XLB']
 US_THEMATIC_TICKERS = ['QQQ', 'MDY', 'IWM', 'SOXX', 'IVW', 'IVE']
 US_ASSET_NAME_MAP = {
     # ベンチマーク
-    '^GSPC': '【米】S&P 500 (市場平均)',
+    'SPY': '【米】S&P 500連動ETF (SPY)',
     # セクター
     'XLK': '【米】情報技術', 'XLV': '【米】ヘルスケア', 'XLF': '【米】金融', 'XLY': '【米】一般消費財',
     'XLC': '【米】コミュニケーション', 'XLI': '【米】資本財', 'XLP': '【米】生活必需品', 'XLE': '【米】エネルギー',
@@ -76,21 +74,17 @@ def calculate_rsi(series: pd.Series, length: int = 14) -> pd.Series:
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
-# --- 3. データ取得と計算（キャッシュ活用） --- (★TOPIXの取得方法を修正)
+# --- 3. データ取得と計算（キャッシュ活用） ---
 @st.cache_data(ttl=3600)
 def get_data_and_indicators(start_date, end_date, target_tickers):
     strength_dfs = {}
     chart_index = pd.date_range(start=start_date, end=end_date, freq='B')
     fetch_start_date = start_date - pd.DateOffset(days=60)
 
-    # --- データ取得ロジックの変更 ---
-    # TOPIXとそれ以外のティッカーを分離
-    yf_tickers = [t for t in target_tickers if t != JP_BENCHMARK_TICKER]
-    
-    # 1. TOPIX以外のデータをYahoo Financeから取得
+    # --- 全てのデータをYahoo Financeから一括で取得 ---
     try:
-        df_yf = yf.download(
-            yf_tickers,
+        df_daily_full = yf.download(
+            target_tickers,
             start=fetch_start_date,
             end=end_date,
             auto_adjust=True,
@@ -99,45 +93,19 @@ def get_data_and_indicators(start_date, end_date, target_tickers):
         )
     except Exception as e:
         st.error(f"Yahoo Financeからのデータ取得中にエラーが発生しました: {e}")
-        df_yf = pd.DataFrame() # エラー時は空のDF
-
-    # 2. TOPIXデータをStooqから取得
-    df_topix = None
-    if JP_BENCHMARK_TICKER in target_tickers:
-        try:
-            # pdr.get_data_stooqは日付が降順で返ってくるので昇順に直す
-            df_topix = pdr.get_data_stooq(JP_BENCHMARK_TICKER, start=fetch_start_date, end=end_date).sort_index()
-            # auto_adjust=True相当の処理（'Adj Close'があればそれを使う）
-            if 'Adj Close' in df_topix.columns:
-                 df_topix['Close'] = df_topix['Adj Close']
-        except Exception as e:
-            st.warning(f"StooqからのTOPIXデータ取得に失敗しました: {e}")
-            df_topix = None
-            
-    # 3. 取得したデータを結合
-    # まずはYahoo Financeのデータから必要な情報を抽出
-    if not df_yf.empty:
-        if not isinstance(df_yf.columns, pd.MultiIndex):
-             # ティッカーが1つの場合でもMultiIndexに変換
-            df_yf.columns = pd.MultiIndex.from_product([df_yf.columns, yf_tickers])
-        df_daily_full = df_yf
-    else:
-        df_daily_full = pd.DataFrame() # Yahooの取得が完全に失敗した場合
-
-    # TOPIXのデータを結合
-    if df_topix is not None:
-        # TOPIXのCloseとVolumeをMultiIndex形式に変換して結合
-        topix_close = pd.DataFrame({('Close', JP_BENCHMARK_TICKER): df_topix['Close']})
-        topix_volume = pd.DataFrame({('Volume', JP_BENCHMARK_TICKER): df_topix['Volume']})
-        df_daily_full = pd.concat([df_daily_full, topix_close, topix_volume], axis=1)
+        return None, None
 
     if df_daily_full.empty:
-        st.error("有効なデータを1件も取得できませんでした。")
+        st.error("データを取得できませんでした。")
         return None, None
+
+    # ティッカーが1つの場合でもMultiIndexに変換
+    if not isinstance(df_daily_full.columns, pd.MultiIndex):
+        df_daily_full.columns = pd.MultiIndex.from_product([df_daily_full.columns, target_tickers])
         
     df_daily_chart = df_daily_full.loc[start_date:end_date].copy()
     
-    # --- 指標計算（ここから下は変更なし） ---
+    # --- 指標計算 ---
     try:
         close_prices_full = df_daily_full['Close']
         volume_data_full = df_daily_full['Volume']
@@ -160,9 +128,25 @@ def get_data_and_indicators(start_date, end_date, target_tickers):
         st.warning(f"日足指標の計算中にエラーが発生しました: {e}")
 
     try:
-        # (日中足の取得はYahooのみ。Stooqには日中足データがないためTOPIXは対象外となる)
-        df_intraday = yf.download(yf_tickers, start=start_date, end=end_date, interval='5m', group_by='ticker', progress=False, timeout=120)
-        # ... (以降のVWAP計算ロジックは変更なし) ...
+        df_intraday = yf.download(target_tickers, start=start_date, end=end_date, interval='5m', group_by='ticker', progress=False, timeout=120)
+        if not df_intraday.empty and isinstance(df_intraday.columns, pd.MultiIndex):
+            daily_results = []
+            for ticker in target_tickers:
+                if ticker in df_intraday.columns:
+                    ticker_df = df_intraday[ticker].copy().dropna()
+                    if not ticker_df.empty:
+                        for date, df_day in ticker_df.groupby(lambda x: x.date()):
+                            total_intervals = len(df_day)
+                            if total_intervals < 1: continue
+                            df_day['TP'] = (df_day['High'] + df_day['Low'] + df_day['Close']) / 3
+                            df_day['TPxV'] = df_day['TP'] * df_day['Volume']
+                            df_day['VWAP'] = df_day['TPxV'].cumsum() / df_day['Volume'].cumsum()
+                            df_day['Std'] = df_day['TP'].expanding().std().fillna(0)
+                            daily_results.append({'Date': pd.to_datetime(date), 'Ticker': ticker, 'VWAP +1σ維持率(5分足)': ((df_day['Low'] >= (df_day['VWAP'] + df_day['Std'])).sum() / total_intervals) * 100, 'VWAP 0σ維持率(5分足)': ((df_day['Low'] >= df_day['VWAP']).sum() / total_intervals) * 100, 'VWAP -1σ維持率(5分足)': ((df_day['Low'] >= (df_day['VWAP'] - df_day['Std'])).sum() / total_intervals) * 100})
+            if daily_results:
+                df_vwap_results = pd.DataFrame(daily_results)
+                for metric in ['VWAP +1σ維持率(5分足)', 'VWAP 0σ維持率(5分足)', 'VWAP -1σ維持率(5分足)']:
+                    strength_dfs[metric] = df_vwap_results.pivot(index='Date', columns='Ticker', values=metric).reindex(chart_index, method='ffill')
     except Exception as e:
         st.warning(f"日中足VWAP指標の計算に失敗しました: {e}")
         
@@ -176,7 +160,7 @@ def get_data_and_indicators(start_date, end_date, target_tickers):
     return close_prices_valid, strength_dfs
 
 
-# --- 4. グラフ描画関数 --- (変更なし)
+# --- 4. グラフ描画関数 ---
 def create_chart(performance_df, strength_dfs, final_absolute_performance,
                  selected_metric, selected_tickers, chart_title, y_label, baseline,
                  all_tickers_in_market, month_separator_date=None):
@@ -241,7 +225,7 @@ def create_chart(performance_df, strength_dfs, final_absolute_performance,
     return fig
 
 
-# --- 5. Streamlit UIとメイン処理 --- (変更なし)
+# --- 5. Streamlit UIとメイン処理 ---
 st.set_page_config(layout="wide")
 st.title('日米セクター＆テーマ別 パフォーマンス分析ツール')
 
@@ -253,7 +237,7 @@ display_mode = st.sidebar.radio(
     '表示モード',
     ('絶対パフォーマンス', '相対パフォーマンス'),
     index=0,
-    help="絶対: 各銘柄の値動き率。相対: 市場平均(TOPIX/S&P500)に対する強さ・弱さ。"
+    help="絶対: 各銘柄の値動き率。相対: 市場平均連動ETFに対する強さ・弱さ。"
 )
 if market_selection == '日米比較' and display_mode == '相対パフォーマンス':
     st.sidebar.warning('日米比較モードでは、相対パフォーマンス表示は利用できません。')
@@ -392,4 +376,3 @@ else:
                 st.dataframe(display_df.sort_index(ascending=False).style.format("{:.2f}", na_rep="-"))
     else:
         st.info("指定された期間のデータを取得できませんでした。期間を変更するか、時間を置いてから再度お試しください。")
-
