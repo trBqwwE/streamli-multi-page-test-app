@@ -4,3 +4,5 @@ pandas
 matplotlib
 numpy
 tzdata
+curl-cffi
+websockets
