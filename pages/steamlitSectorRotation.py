@@ -3,13 +3,9 @@ import yfinance as yf
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
-# pandas_ta はもうインポートしない
 import numpy as np
 import time
 import warnings
-
-# --- 0. Streamlit アプリ設定 ---
-st.set_page_config(layout="wide")
 
 # --- 1. 定数と共通設定 ---
 warnings.filterwarnings('ignore', category=UserWarning)
@@ -28,7 +24,6 @@ SECTOR_NAME_MAP = {
 
 # --- 2. 自作の指標計算関数 ---
 def calculate_rsi(series: pd.Series, length: int = 14) -> pd.Series:
-    """pandasだけでRSIを計算する関数"""
     delta = series.diff()
     gain = delta.where(delta > 0, 0).ewm(alpha=1/length, adjust=False).mean()
     loss = -delta.where(delta < 0, 0).ewm(alpha=1/length, adjust=False).mean()
@@ -39,21 +34,13 @@ def calculate_rsi(series: pd.Series, length: int = 14) -> pd.Series:
 # --- 3. データ取得と計算（キャッシュ活用） ---
 @st.cache_data(ttl=3600)
 def get_data_and_indicators(start_date, end_date):
-    """
-    指定された期間の株価データを取得し、各種指標を計算する関数。
-    """
-    # ------------------ ここから修正 ------------------
-    import yfinance as yf  # 👈 この行を関数の「中」の先頭に追加
-    import time            # 👈 この行も関数の「中」に移動
+    import yfinance as yf # 念のため関数内でもインポート
     
-    # yfinanceライブラリに接続処理を完全に任せます。
-    # ------------------ ここまで修正 ------------------
-
     strength_dfs = {}
     chart_index = pd.date_range(start=start_date, end=end_date, freq='B')
 
     try:
-        df_daily_full = yfinance.download(
+        df_daily_full = yf.download(
             US_SECTOR_TICKERS, 
             start=start_date - pd.DateOffset(days=60), 
             end=end_date, 
@@ -61,7 +48,7 @@ def get_data_and_indicators(start_date, end_date):
             progress=False
         )
         if df_daily_full.empty:
-            st.error("日足データの取得に失敗しました。ティッカーが無効か、一時的なネットワーク問題の可能性があります。")
+            st.error("日足データの取得に失敗しました。")
             return None
     except Exception as e:
         st.error(f"日足データの取得中に予期せぬエラーが発生しました: {e}")
@@ -69,15 +56,13 @@ def get_data_and_indicators(start_date, end_date):
 
     df_daily_chart = df_daily_full.loc[start_date:end_date].copy()
 
-    # --- 指標計算 (変更なし) ---
+    # (指標計算ロジックは省略せず記載)
     try:
         close_prices = df_daily_full['Close']
         volume_data = df_daily_full['Volume']
-        
         all_rsi_series = [calculate_rsi(close_prices[ticker]).rename(ticker) for ticker in US_SECTOR_TICKERS if ticker in close_prices]
         if all_rsi_series:
             strength_dfs['RSI (日足14)'] = pd.concat(all_rsi_series, axis=1).reindex(chart_index, method='ffill')
-        
         all_volume_series = []
         for ticker in US_SECTOR_TICKERS:
             if ticker in volume_data:
@@ -91,9 +76,8 @@ def get_data_and_indicators(start_date, end_date):
             strength_dfs['出来高急増率(日足20)'] = volume_normalized.reindex(chart_index, method='ffill')
     except Exception as e:
         st.warning(f"日足指標の計算中にエラーが発生しました: {e}")
-
     try:
-        df_intraday = yfinance.download(
+        df_intraday = yf.download(
             US_SECTOR_TICKERS, 
             start=start_date, 
             end=end_date, 
@@ -127,17 +111,15 @@ def get_data_and_indicators(start_date, end_date):
     cumulative_returns = cumulative_returns.fillna(0)
     final_performance = cumulative_returns.iloc[-1].sort_values(ascending=False)
     sorted_tickers = final_performance.index
-
     return cumulative_returns, strength_dfs, final_performance, sorted_tickers
 
-# --- 4. グラフ描画関数 ---
+# --- 4. グラフ描画関数 --- (変更なし)
 def create_chart(cumulative_returns, strength_dfs, final_performance, sorted_tickers,
                  selected_metric, selected_tickers, title_period_text, month_separator_date=None):
     fig, ax = plt.subplots(figsize=(16, 9))
     colors = plt.colormaps.get('tab10').colors
     ticker_colors = {ticker: colors[i % len(colors)] for i, ticker in enumerate(US_SECTOR_TICKERS)}
     strength_df = strength_dfs.get(selected_metric)
-
     for ticker in sorted_tickers:
         if ticker not in selected_tickers: continue
         for j in range(len(cumulative_returns) - 1):
@@ -153,12 +135,10 @@ def create_chart(cumulative_returns, strength_dfs, final_performance, sorted_tic
                 except (KeyError, IndexError):
                     alpha = 0.15
             ax.plot([d_start, d_end], [y_start, y_end], color=ticker_colors[ticker], linewidth=2.5, alpha=alpha, zorder=2)
-
     last_date = cumulative_returns.index[-1]
     for i, ticker in enumerate(sorted_tickers):
         if ticker in selected_tickers:
             ax.text(last_date, final_performance[ticker], f' {i+1}', color=ticker_colors[ticker], fontsize=10, fontweight='bold', va='center', zorder=3)
-
     ax.set_title(f'セクター別累積リターンと各種指標（{title_period_text}）', fontsize=16)
     ax.set_ylabel('累積リターン (%)')
     ax.set_xlabel('日付（線の濃さは選択した指標の強度を示す）')
@@ -174,16 +154,14 @@ def create_chart(cumulative_returns, strength_dfs, final_performance, sorted_tic
     fig.tight_layout(rect=[0, 0, 0.85, 1])
     return fig
 
-# --- 5. Streamlit UIとメイン処理 ---
-st.title('米国セクター別 パフォーマンス・強度分析')
-st.markdown("...") # 省略
-
+# --- 5. Streamlit UIとメイン処理 --- (変更なし)
+# st.title, st.markdown などはメインの `streamlit_app.py` にあるので、ここでは不要
+# サイドバーとメイン処理のみを記載
 st.sidebar.header('表示設定')
 period_option = st.sidebar.selectbox('表示期間を選択', ('先月から今日まで', '今月', '年初来', '過去1年間', 'カスタム'), index=0)
 today = pd.Timestamp.today().normalize()
 month_separator_date = None
 
-# (期間選択ロジック - 省略...元のコードと同じ)
 if period_option == '先月から今日まで':
     start_of_this_month = today.replace(day=1)
     start_date = start_of_this_month - pd.DateOffset(months=1)
@@ -225,11 +203,9 @@ else:
         sector_labels = [f"{i+1}. {SECTOR_NAME_MAP.get(t, t)} ({t})" for i, t in enumerate(sorted_tickers)]
         selected_labels = st.sidebar.multiselect('表示するセクター（パフォーマンス順）', options=sector_labels, default=sector_labels)
         selected_tickers = [label.split('(')[-1].replace(')', '') for label in selected_labels]
-
         st.header('セクター別 累積リターン')
         chart_fig = create_chart(cumulative_returns, strength_dfs, final_performance, sorted_tickers, selected_metric, selected_tickers, title_period_text, month_separator_date)
         st.pyplot(chart_fig)
-        
         st.header('パフォーマンスランキング')
         st.markdown(f"**期間:** {title_period_text}")
         perf_df = final_performance.to_frame(name='累積リターン')
@@ -237,7 +213,6 @@ else:
         perf_df['セクター名'] = [SECTOR_NAME_MAP.get(idx, idx) for idx in perf_df.index]
         perf_df = perf_df[['セクター名', '累積リターン']]
         st.dataframe(perf_df, use_container_width=True)
-        
         if selected_metric and strength_dfs.get(selected_metric) is not None:
             st.header(f'指標データ: {selected_metric}')
             strength_df = strength_dfs.get(selected_metric)
@@ -247,5 +222,3 @@ else:
                 st.dataframe(display_df.sort_index(ascending=False).style.format("{:.2f}", na_rep="-"))
     else:
         st.error("データを表示できませんでした。期間を変更するか、時間を置いてから再度お試しください。")
-
-
