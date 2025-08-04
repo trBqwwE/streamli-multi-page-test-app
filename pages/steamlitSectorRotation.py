@@ -10,13 +10,11 @@ import warnings
 # --- 1. 定数と共通設定 ---
 warnings.filterwarnings('ignore', category=UserWarning)
 try:
-    # 日本語フォントを設定
     plt.rcParams['font.family'] = 'IPAGothic'
 except RuntimeError:
     st.warning("日本語フォント（IPAGothic）が見つかりません。正しく表示されない可能性があります。")
 plt.rcParams['axes.unicode_minus'] = False
 
-# 米国セクターETFの定義
 US_SECTOR_TICKERS = ['XLK', 'XLV', 'XLF', 'XLY', 'XLC', 'XLI', 'XLP', 'XLE', 'XLU', 'XLRE', 'XLB']
 US_SECTOR_NAME_MAP = {
     'XLK': '【米】情報技術', 'XLV': '【米】ヘルスケア', 'XLF': '【米】金融', 'XLY': '【米】一般消費財',
@@ -24,7 +22,6 @@ US_SECTOR_NAME_MAP = {
     'XLU': '【米】公益事業', 'XLRE': '【米】不動産', 'XLB': '【米】素材'
 }
 
-# 日本株セクターETF（TOPIX-17シリーズ）の定義
 JP_SECTOR_TICKERS = [
     '1617.T', '1618.T', '1619.T', '1620.T', '1621.T', '1622.T', '1623.T', '1624.T',
     '1625.T', '1626.T', '1627.T', '1628.T', '1629.T', '1630.T', '1631.T', '1632.T', '1633.T'
@@ -36,7 +33,6 @@ JP_SECTOR_NAME_MAP = {
     '1629.T': '【日】情報通信・サービス他', '1630.T': '【日】小売', '1631.T': '【日】化学', '1632.T': '【日】機械', '1633.T': '【日】電力・ガス'
 }
 
-# 日米の定義を統合
 COMBINED_SECTOR_NAME_MAP = {**US_SECTOR_NAME_MAP, **JP_SECTOR_NAME_MAP}
 
 # --- 2. 自作の指標計算関数 --- (変更なし)
@@ -48,7 +44,7 @@ def calculate_rsi(series: pd.Series, length: int = 14) -> pd.Series:
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
-# --- 3. データ取得と計算（キャッシュ活用） --- (変更なし)
+# --- 3. データ取得と計算（キャッシュ活用） --- (★ここを修正)
 @st.cache_data(ttl=3600)
 def get_data_and_indicators(start_date, end_date, target_tickers):
     import yfinance as yf
@@ -77,6 +73,7 @@ def get_data_and_indicators(start_date, end_date, target_tickers):
 
     df_daily_chart = df_daily_full.loc[start_date:end_date].copy()
 
+    # (日足指標計算ロジックは変更なし)
     try:
         close_prices = df_daily_full['Close']
         volume_data = df_daily_full['Volume']
@@ -98,6 +95,7 @@ def get_data_and_indicators(start_date, end_date, target_tickers):
     except Exception as e:
         st.warning(f"日足指標の計算中にエラーが発生しました: {e}")
 
+    # (日中足VWAP指標計算ロジックは変更なし)
     try:
         df_intraday = yf.download(
             target_tickers,
@@ -129,19 +127,31 @@ def get_data_and_indicators(start_date, end_date, target_tickers):
     except Exception as e:
         st.warning(f"日中足VWAP指標の計算に失敗しました: {e}")
 
-    valid_tickers = df_daily_chart['Close'].columns[df_daily_chart['Close'].notna().all()]
-    if valid_tickers.empty:
-        st.error("選択された期間に有効な価格データを持つセクターがありません。")
+    # --- ここからが修正箇所 ---
+    # 祝日の違いによるデータ欠損に対応するため、検証ロジックを変更
+    # 期間中に2日以上の有効な価格データを持つティッカーのみを対象とする
+    close_prices_chart = df_daily_chart['Close']
+    valid_tickers = close_prices_chart.columns[close_prices_chart.notna().sum() > 1]
+
+    if not valid_tickers.any(): # .any() を使ってティッカーが一つでも存在するか確認
+        st.error("選択された期間に有効な価格データを持つセクターがありません。（2日以上のデータを持つセクターが見つかりません）")
         return None
 
-    cumulative_returns = (1 + df_daily_chart['Close'][valid_tickers].pct_change()).cumprod() - 1
-    cumulative_returns = cumulative_returns.fillna(0)
+    # 有効なティッカーのデータのみを使用
+    close_prices_valid = close_prices_chart[valid_tickers]
+
+    # 変化率を計算し、NaN（祝日などで発生）を0で埋める
+    # これにより、データがない日はリターン0%として扱われ、累積計算が継続される
+    cumulative_returns = (1 + close_prices_valid.pct_change().fillna(0)).cumprod() - 1
+    # --- 修正箇所ここまで ---
+
     final_performance = cumulative_returns.iloc[-1].sort_values(ascending=False)
     sorted_tickers = final_performance.index.tolist()
 
     return cumulative_returns, strength_dfs, final_performance, sorted_tickers
 
-# --- 4. グラフ描画関数 --- (★ここを変更)
+
+# --- 4. グラフ描画関数 --- (変更なし)
 def create_chart(cumulative_returns, strength_dfs, final_performance, sorted_tickers,
                  selected_metric, selected_tickers, title_period_text,
                  all_tickers_for_market, month_separator_date=None):
@@ -181,16 +191,13 @@ def create_chart(cumulative_returns, strength_dfs, final_performance, sorted_tic
     ax.grid(True, linestyle='--', alpha=0.6, zorder=1)
     ax.axhline(0, color='black', linestyle='--', zorder=1)
 
-    # --- SQ日の描画 ---
     chart_start_date = cumulative_returns.index[0]
     chart_end_date = cumulative_returns.index[-1]
 
-    # 米国オプションSQ日 (第3金曜日)
     us_sq_dates = pd.date_range(start=chart_start_date, end=chart_end_date, freq='WOM-3FRI')
     for sq_date in us_sq_dates:
         ax.axvline(x=sq_date, color='red', linestyle='--', linewidth=1.5, zorder=5)
 
-    # 日本オプションSQ日 (第2金曜日)
     jp_sq_dates = pd.date_range(start=chart_start_date, end=chart_end_date, freq='WOM-2FRI')
     for sq_date in jp_sq_dates:
         ax.axvline(x=sq_date, color='blue', linestyle='--', linewidth=1.5, zorder=5)
@@ -198,7 +205,6 @@ def create_chart(cumulative_returns, strength_dfs, final_performance, sorted_tic
     if month_separator_date:
         ax.axvline(x=month_separator_date, color='gray', linestyle=':', linewidth=2, zorder=5)
 
-    # --- 凡例の作成 ---
     legend_elements = [Line2D([0], [0], color=ticker_colors.get(ticker, 'gray'), lw=4, label=f"{i+1}. {COMBINED_SECTOR_NAME_MAP[ticker]} ({ticker})") for i, ticker in enumerate(sorted_tickers) if ticker in selected_tickers]
     legend_elements.append(Line2D([0], [0], color='red', linestyle='--', lw=1.5, label='米国SQ日 (第3金曜)'))
     legend_elements.append(Line2D([0], [0], color='blue', linestyle='--', lw=1.5, label='日本SQ日 (第2金曜)'))
@@ -219,7 +225,7 @@ st.sidebar.header('表示設定')
 market_selection = st.sidebar.radio(
     '表示する市場を選択',
     ('米国セクター', '日本セクター', '日米比較'),
-    index=0)
+    index=2) # デフォルトを「日米比較」に変更してテストしやすくする
 
 period_option = st.sidebar.selectbox('表示期間を選択', ('先月から今日まで', '今月', '年初来', '過去1年間', 'カスタム'), index=0)
 today = pd.Timestamp.today().normalize()
