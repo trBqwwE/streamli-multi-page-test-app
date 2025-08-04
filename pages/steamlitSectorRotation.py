@@ -7,7 +7,7 @@ import numpy as np
 import time
 import warnings
 
-# --- 1. 定数と共通設定 ---
+# --- 1. 定数と共通設定 (変更なし) ---
 warnings.filterwarnings('ignore', category=UserWarning)
 try:
     plt.rcParams['font.family'] = 'IPAGothic'
@@ -15,7 +15,7 @@ except RuntimeError:
     st.warning("日本語フォント（IPAGothic）が見つかりません。正しく表示されない可能性があります。")
 plt.rcParams['axes.unicode_minus'] = False
 
-# --- 日本市場の定義 ---
+# --- 日本市場の定義 (変更なし) ---
 JP_BENCHMARK_TICKER = '1306.T' # TOPIX連動ETF
 JP_SECTOR_TICKERS = [
     '1617.T', '1618.T', '1619.T', '1620.T', '1621.T', '1622.T', '1623.T', '1624.T',
@@ -39,7 +39,7 @@ JP_ASSET_NAME_MAP = {
     '1474.T': '【日】バリュー (TOPIX Value)'
 }
 
-# --- 米国市場の定義 (★ベンチマークをETFに変更) ---
+# --- 米国市場の定義 (変更なし) ---
 US_BENCHMARK_TICKER = 'SPY' # S&P 500連動ETF
 US_SECTOR_TICKERS = ['XLK', 'XLV', 'XLF', 'XLY', 'XLC', 'XLI', 'XLP', 'XLE', 'XLU', 'XLRE', 'XLB']
 US_THEMATIC_TICKERS = ['QQQ', 'MDY', 'IWM', 'SOXX', 'IVW', 'IVE']
@@ -59,13 +59,19 @@ US_ASSET_NAME_MAP = {
     'IVE':  '【米】バリュー (S&P 500 Value)'
 }
 
-# 全資産の定義を統合
+# 全資産の定義を統合 (変更なし)
 ALL_JP_TICKERS = list(set([JP_BENCHMARK_TICKER] + JP_SECTOR_TICKERS + JP_THEMATIC_TICKERS))
 ALL_US_TICKERS = list(set([US_BENCHMARK_TICKER] + US_SECTOR_TICKERS + US_THEMATIC_TICKERS))
 ALL_ASSETS_NAME_MAP = {**JP_ASSET_NAME_MAP, **US_ASSET_NAME_MAP}
 
+# --- ★変更点①: Session State の初期化 ---
+# アプリのセッション内で日足データを保持するための領域を確保
+if 'daily_data' not in st.session_state:
+    st.session_state.daily_data = pd.DataFrame()
+    st.session_state.loaded_tickers = []
 
-# --- 2. 自作の指標計算関数 ---
+
+# --- 2. 自作の指標計算関数 (変更なし) ---
 def calculate_rsi(series: pd.Series, length: int = 14) -> pd.Series:
     delta = series.diff()
     gain = delta.where(delta > 0, 0).ewm(alpha=1/length, adjust=False).mean()
@@ -74,38 +80,121 @@ def calculate_rsi(series: pd.Series, length: int = 14) -> pd.Series:
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
-# --- 3. データ取得と計算（キャッシュ活用） ---
+# --- ★変更点②: データ取得と計算ロジックの刷新 ---
+
+# 日中足データは重いため、個別の関数に分離しキャッシュ
 @st.cache_data(ttl=3600)
-def get_data_and_indicators(start_date, end_date, target_tickers):
-    strength_dfs = {}
+def get_intraday_data_and_vwap(start_date, end_date, target_tickers):
+    """指定された期間の日中足データを取得し、VWAP関連指標を計算する"""
+    strength_dfs_vwap = {}
     chart_index = pd.date_range(start=start_date, end=end_date, freq='B')
-    fetch_start_date = start_date - pd.DateOffset(days=60)
-
-    # --- 全てのデータをYahoo Financeから一括で取得 ---
     try:
-        df_daily_full = yf.download(
+        df_intraday = yf.download(
             target_tickers,
-            start=fetch_start_date,
+            start=start_date,
             end=end_date,
-            auto_adjust=True,
+            interval='5m',
+            group_by='ticker',
             progress=False,
-            timeout=60
+            timeout=120
         )
+        if not df_intraday.empty and isinstance(df_intraday.columns, pd.MultiIndex):
+            daily_results = []
+            for ticker in target_tickers:
+                if ticker in df_intraday.columns:
+                    ticker_df = df_intraday[ticker].copy().dropna()
+                    if not ticker_df.empty:
+                        for date, df_day in ticker_df.groupby(lambda x: x.date()):
+                            total_intervals = len(df_day)
+                            if total_intervals < 1: continue
+                            df_day['TP'] = (df_day['High'] + df_day['Low'] + df_day['Close']) / 3
+                            df_day['TPxV'] = df_day['TP'] * df_day['Volume']
+                            df_day['VWAP'] = df_day['TPxV'].cumsum() / df_day['Volume'].cumsum()
+                            df_day['Std'] = df_day['TP'].expanding().std().fillna(0)
+                            daily_results.append({
+                                'Date': pd.to_datetime(date), 'Ticker': ticker,
+                                'VWAP +1σ維持率(5分足)': ((df_day['Low'] >= (df_day['VWAP'] + df_day['Std'])).sum() / total_intervals) * 100,
+                                'VWAP 0σ維持率(5分足)': ((df_day['Low'] >= df_day['VWAP']).sum() / total_intervals) * 100,
+                                'VWAP -1σ維持率(5分足)': ((df_day['Low'] >= (df_day['VWAP'] - df_day['Std'])).sum() / total_intervals) * 100
+                            })
+            if daily_results:
+                df_vwap_results = pd.DataFrame(daily_results)
+                for metric in ['VWAP +1σ維持率(5分足)', 'VWAP 0σ維持率(5分足)', 'VWAP -1σ維持率(5分足)']:
+                    strength_dfs_vwap[metric] = df_vwap_results.pivot(
+                        index='Date', columns='Ticker', values=metric
+                    ).reindex(chart_index, method='ffill')
     except Exception as e:
-        st.error(f"Yahoo Financeからのデータ取得中にエラーが発生しました: {e}")
-        return None, None
+        st.warning(f"日中足VWAP指標の計算に失敗しました: {e}")
+    return strength_dfs_vwap
 
+
+def get_data_and_indicators(period_option, start_date, end_date, target_tickers):
+    """
+    データ取得と指標計算のメイン関数。
+    日足データは session_state を活用してキャッシュし、高速化を図る。
+    """
+    # 市場が変更されたら日足キャッシュをクリア
+    if set(target_tickers) != set(st.session_state.loaded_tickers):
+        st.session_state.daily_data = pd.DataFrame()
+        st.session_state.loaded_tickers = target_tickers
+
+    # --- 日足データの取得判断 ---
+    reload_daily_data = False
+    fetch_start = start_date
+    fetch_end = end_date
+
+    # 「年初来」「過去1年間」「カスタム」の場合は常にデータを再取得
+    if period_option in ['年初来', '過去1年間', 'カスタム']:
+        reload_daily_data = True
+    # キャッシュがない場合（初回ロード時）は、3ヶ月分のデータを取得
+    elif st.session_state.daily_data.empty:
+        st.info("初回ロードのため、過去3ヶ月分の日足データを取得します。")
+        fetch_start = pd.Timestamp.today().normalize() - pd.DateOffset(months=3)
+        reload_daily_data = True
+
+    if reload_daily_data:
+        with st.spinner('日足データを取得中です...'):
+            try:
+                # RSI等の計算のために60日余分に取得
+                fetch_start_with_margin = fetch_start - pd.DateOffset(days=60)
+                df_daily_full = yf.download(
+                    target_tickers,
+                    start=fetch_start_with_margin,
+                    end=fetch_end,
+                    auto_adjust=True,
+                    progress=False,
+                    timeout=60
+                )
+                if df_daily_full.empty:
+                     st.error("日足データを取得できませんでした。")
+                     return None, None
+                # 取得したデータをセッションに保存
+                st.session_state.daily_data = df_daily_full
+            except Exception as e:
+                st.error(f"Yahoo Financeからの日足データ取得中にエラーが発生しました: {e}")
+                return None, None
+
+    # --- 計算処理 ---
+    # セッションに保存されたデータを使用
+    df_daily_full = st.session_state.daily_data
     if df_daily_full.empty:
-        st.error("データを取得できませんでした。")
+        st.error("表示するデータがありません。")
         return None, None
 
     # ティッカーが1つの場合でもMultiIndexに変換
     if not isinstance(df_daily_full.columns, pd.MultiIndex):
         df_daily_full.columns = pd.MultiIndex.from_product([df_daily_full.columns, target_tickers])
-        
+
+    # 表示期間でデータをスライス
     df_daily_chart = df_daily_full.loc[start_date:end_date].copy()
-    
-    # --- 指標計算 ---
+    if df_daily_chart.empty:
+        st.error("選択された期間にデータがありません。期間を変更してください。")
+        return None, None
+
+    strength_dfs = {}
+    chart_index = pd.date_range(start=start_date, end=end_date, freq='B')
+
+    # --- 日足指標の計算 ---
     try:
         close_prices_full = df_daily_full['Close']
         volume_data_full = df_daily_full['Volume']
@@ -127,59 +216,41 @@ def get_data_and_indicators(start_date, end_date, target_tickers):
     except Exception as e:
         st.warning(f"日足指標の計算中にエラーが発生しました: {e}")
 
-    try:
-        df_intraday = yf.download(target_tickers, start=start_date, end=end_date, interval='5m', group_by='ticker', progress=False, timeout=120)
-        if not df_intraday.empty and isinstance(df_intraday.columns, pd.MultiIndex):
-            daily_results = []
-            for ticker in target_tickers:
-                if ticker in df_intraday.columns:
-                    ticker_df = df_intraday[ticker].copy().dropna()
-                    if not ticker_df.empty:
-                        for date, df_day in ticker_df.groupby(lambda x: x.date()):
-                            total_intervals = len(df_day)
-                            if total_intervals < 1: continue
-                            df_day['TP'] = (df_day['High'] + df_day['Low'] + df_day['Close']) / 3
-                            df_day['TPxV'] = df_day['TP'] * df_day['Volume']
-                            df_day['VWAP'] = df_day['TPxV'].cumsum() / df_day['Volume'].cumsum()
-                            df_day['Std'] = df_day['TP'].expanding().std().fillna(0)
-                            daily_results.append({'Date': pd.to_datetime(date), 'Ticker': ticker, 'VWAP +1σ維持率(5分足)': ((df_day['Low'] >= (df_day['VWAP'] + df_day['Std'])).sum() / total_intervals) * 100, 'VWAP 0σ維持率(5分足)': ((df_day['Low'] >= df_day['VWAP']).sum() / total_intervals) * 100, 'VWAP -1σ維持率(5分足)': ((df_day['Low'] >= (df_day['VWAP'] - df_day['Std'])).sum() / total_intervals) * 100})
-            if daily_results:
-                df_vwap_results = pd.DataFrame(daily_results)
-                for metric in ['VWAP +1σ維持率(5分足)', 'VWAP 0σ維持率(5分足)', 'VWAP -1σ維持率(5分足)']:
-                    strength_dfs[metric] = df_vwap_results.pivot(index='Date', columns='Ticker', values=metric).reindex(chart_index, method='ffill')
-    except Exception as e:
-        st.warning(f"日中足VWAP指標の計算に失敗しました: {e}")
-        
+    # --- 日中足VWAP指標の計算 (キャッシュされた関数を呼び出し) ---
+    vwap_strength_dfs = get_intraday_data_and_vwap(start_date, end_date, target_tickers)
+    strength_dfs.update(vwap_strength_dfs)
+
+    # --- 戻り値の準備 ---
     close_prices_chart = df_daily_chart['Close']
     valid_tickers = [t for t in target_tickers if t in close_prices_chart.columns and close_prices_chart[t].notna().sum() > 1]
     if not valid_tickers:
         st.error("選択された期間に有効な価格データを持つ銘柄がありません。")
         return None, None
-    
+
     close_prices_valid = close_prices_chart[valid_tickers]
     return close_prices_valid, strength_dfs
 
 
-# --- 4. グラフ描画関数 ---
+# --- 4. グラフ描画関数 (変更なし) ---
 def create_chart(performance_df, strength_dfs, final_absolute_performance,
                  selected_metric, selected_tickers, chart_title, y_label, baseline,
                  all_tickers_in_market, month_separator_date=None):
     fig, ax = plt.subplots(figsize=(16, 9))
-    
+
     cmap = plt.get_cmap('nipy_spectral', len(all_tickers_in_market))
     ticker_colors = {ticker: cmap(i) for i, ticker in enumerate(all_tickers_in_market)}
-    
+
     strength_df = strength_dfs.get(selected_metric)
     sorted_for_legend = final_absolute_performance.index
 
     for ticker in sorted_for_legend:
         if ticker not in selected_tickers or ticker not in performance_df.columns: continue
-        
+
         perf_series = performance_df[ticker]
         for j in range(len(perf_series) - 1):
             d_start, d_end = perf_series.index[j], perf_series.index[j+1]
             y_start, y_end = perf_series.iloc[j], perf_series.iloc[j+1]
-            
+
             alpha = 0.6
             if strength_df is not None and not strength_df.empty and ticker in strength_df.columns:
                 try:
@@ -189,7 +260,7 @@ def create_chart(performance_df, strength_dfs, final_absolute_performance,
                     alpha = 0.15 + (0.85 * (np.clip(final_strength, 0, 100) / 100))
                 except (KeyError, IndexError):
                     alpha = 0.15
-            
+
             ax.plot([d_start, d_end], [y_start, y_end], color=ticker_colors.get(ticker, 'gray'), linewidth=2.5, alpha=alpha, zorder=2)
 
     last_date = performance_df.index[-1]
@@ -203,7 +274,7 @@ def create_chart(performance_df, strength_dfs, final_absolute_performance,
     ax.set_xlabel('日付（線の濃さは選択した指標の強度を示す）')
     ax.grid(True, linestyle='--', alpha=0.6, zorder=1)
     ax.axhline(baseline, color='black', linestyle='--', zorder=1)
-    
+
     chart_start_date = performance_df.index[0]
     chart_end_date = performance_df.index[-1]
 
@@ -212,7 +283,7 @@ def create_chart(performance_df, strength_dfs, final_absolute_performance,
 
     jp_sq_dates = pd.date_range(start=chart_start_date, end=chart_end_date, freq='WOM-2FRI')
     for sq_date in jp_sq_dates: ax.axvline(x=sq_date, color='blue', linestyle='--', linewidth=1.5, zorder=5)
-    
+
     if month_separator_date: ax.axvline(x=month_separator_date, color='gray', linestyle=':', linewidth=2, zorder=5)
 
     legend_elements = [Line2D([0], [0], color=ticker_colors.get(ticker, 'gray'), lw=4, label=f"{i+1}. {ALL_ASSETS_NAME_MAP.get(ticker, ticker)} ({ticker})") for i, ticker in enumerate(sorted_for_legend) if ticker in selected_tickers]
@@ -265,9 +336,10 @@ elif period_option == '過去1年間':
     start_date = today - pd.DateOffset(years=1)
     end_date = today
     title_period_text = "過去1年間"
-else:
+else: # カスタム
     col1, col2 = st.sidebar.columns(2)
-    start_date = col1.date_input('開始日', today - pd.DateOffset(months=1))
+    default_start_date = today - pd.DateOffset(months=1)
+    start_date = col1.date_input('開始日', default_start_date)
     end_date = col2.date_input('終了日', today)
     title_period_text = f"{pd.to_datetime(start_date).strftime('%Y/%m/%d')} - {pd.to_datetime(end_date).strftime('%Y/%m/%d')}"
 
@@ -280,14 +352,21 @@ else:
     elif market_selection == '米国':
         target_tickers = ALL_US_TICKERS
         benchmark_ticker = US_BENCHMARK_TICKER
-    else:
+    else: # 日米比較
         target_tickers = ALL_JP_TICKERS + ALL_US_TICKERS
         benchmark_ticker = None
 
-    with st.spinner('データを取得・計算中です...'):
-        close_prices, strength_dfs = get_data_and_indicators(pd.to_datetime(start_date), pd.to_datetime(end_date), target_tickers)
+    # --- ★変更点③: 新しいデータ取得・計算関数の呼び出し ---
+    # period_option を渡して、データ取得戦略を制御する
+    close_prices, strength_dfs = get_data_and_indicators(
+        period_option,
+        pd.to_datetime(start_date),
+        pd.to_datetime(end_date),
+        target_tickers
+    )
 
     if close_prices is not None and not close_prices.empty:
+        # --- これ以降の描画・表示ロジックは変更なし ---
         absolute_cumulative_returns = (1 + close_prices.pct_change().fillna(0)).cumprod() - 1
         final_absolute_performance = absolute_cumulative_returns.iloc[-1].sort_values(ascending=False)
         sorted_tickers_by_abs = final_absolute_performance.index.tolist()
@@ -303,7 +382,7 @@ else:
             else:
                 st.error(f'ベンチマーク({benchmark_ticker})のデータ取得に失敗したため、絶対パフォーマンスを表示します。')
                 display_mode = '絶対パフォーマンス'
-        
+
         if display_mode == '絶対パフォーマンス':
              performance_to_plot = absolute_cumulative_returns * 100
              chart_title = f'{market_selection}市場 絶対パフォーマンス {chart_title_suffix}'
@@ -315,40 +394,40 @@ else:
             selected_metric = None
         else:
             selected_metric = st.sidebar.radio('線の濃さに反映する指標', metric_labels, index=0)
-        
+
         all_labels = [f"{i+1}. {ALL_ASSETS_NAME_MAP.get(t, t)} ({t})" for i, t in enumerate(sorted_tickers_by_abs)]
-        
+
         if 'selected_tickers' not in st.session_state or 'market_selection_memory' not in st.session_state or st.session_state.market_selection_memory != market_selection:
             st.session_state.selected_tickers = sorted_tickers_by_abs
             st.session_state.market_selection_memory = market_selection
 
         st.sidebar.write("---")
         st.sidebar.write("**表示銘柄の一括選択**")
-        
+
         cols = st.sidebar.columns(2)
         if cols[0].button('米国のみ', use_container_width=True):
             st.session_state.selected_tickers = [t for t in sorted_tickers_by_abs if t in ALL_US_TICKERS]
         if cols[1].button('日本のみ', use_container_width=True):
             st.session_state.selected_tickers = [t for t in sorted_tickers_by_abs if t in ALL_JP_TICKERS]
-        
+
         cols = st.sidebar.columns(2)
         if cols[0].button('すべて選択', use_container_width=True):
             st.session_state.selected_tickers = sorted_tickers_by_abs
         if cols[1].button('すべて解除', use_container_width=True):
             st.session_state.selected_tickers = []
-        
+
         tickers_to_select = st.session_state.get('selected_tickers', [])
         default_labels = [label for label in all_labels if label.split('(')[-1].replace(')', '') in tickers_to_select]
 
         selected_labels = st.sidebar.multiselect(
-            '**表示する銘柄（絶対パフォーマンス順）**', 
-            options=all_labels, 
+            '**表示する銘柄（絶対パフォーマンス順）**',
+            options=all_labels,
             default=default_labels
         )
-        
+
         current_selected_tickers = [label.split('(')[-1].replace(')', '') for label in selected_labels]
         st.session_state.selected_tickers = current_selected_tickers
-        
+
         st.header(chart_title)
         chart_fig = create_chart(
             performance_to_plot, strength_dfs, final_absolute_performance,
@@ -357,7 +436,7 @@ else:
             target_tickers, month_separator_date
         )
         st.pyplot(chart_fig)
-        
+
         st.header('パフォーマンスランキング（絶対リターン基準）')
         st.markdown(f"**期間:** {title_period_text}")
         perf_df = final_absolute_performance.to_frame(name='累積リターン')
@@ -365,7 +444,7 @@ else:
         perf_df['銘柄名'] = [ALL_ASSETS_NAME_MAP.get(idx, idx) for idx in perf_df.index]
         perf_df = perf_df.reindex(columns=['銘柄名', '累積リターン'])
         st.dataframe(perf_df.loc[[t for t in sorted_tickers_by_abs if t in current_selected_tickers]], use_container_width=True)
-        
+
         if selected_metric and strength_dfs.get(selected_metric) is not None:
             st.header(f'指標データ: {selected_metric}')
             strength_df_to_display = strength_dfs.get(selected_metric)
@@ -374,5 +453,5 @@ else:
                 display_df = display_df[[ticker for ticker in sorted_tickers_by_abs if ticker in current_selected_tickers]]
                 display_df.columns = [f"{ALL_ASSETS_NAME_MAP.get(c, c)} ({c})" for c in display_df.columns]
                 st.dataframe(display_df.sort_index(ascending=False).style.format("{:.2f}", na_rep="-"))
-    else:
-        st.info("指定された期間のデータを取得できませんでした。期間を変更するか、時間を置いてから再度お試しください。")
+    # else:
+    #     st.info("データを準備しています。サイドバーで表示期間を選択してください。")
