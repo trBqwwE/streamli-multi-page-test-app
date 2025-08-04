@@ -16,8 +16,6 @@ except RuntimeError:
     st.warning("日本語フォント（IPAGothic）が見つかりません。正しく表示されない可能性があります。")
 plt.rcParams['axes.unicode_minus'] = False
 
-# ★ yfinanceがStooqのデータを上書きできるように設定を追加
-yf.pdr_override()
 
 # --- 日本市場の定義 ---
 JP_BENCHMARK_TICKER = '^TPX' # TOPIX
@@ -394,3 +392,4 @@ else:
                 st.dataframe(display_df.sort_index(ascending=False).style.format("{:.2f}", na_rep="-"))
     else:
         st.info("指定された期間のデータを取得できませんでした。期間を変更するか、時間を置いてから再度お試しください。")
+
