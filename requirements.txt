@@ -6,4 +6,5 @@ numpy
 tzdata
 curl-cffi
 websockets
-pandas-datareader
+pandas-datareader>=0.10.0
+
