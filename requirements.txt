@@ -1,7 +1,7 @@
-streamlit==1.37.0
-yfinance==0.2.40
-pandas==2.2.2
-matplotlib==3.9.0
-pandas-ta==0.3.14b0
-numpy==1.26.4
+streamlit
+yfinance
+pandas
+matplotlib
+pandas-ta
+numpy
 tzdata
