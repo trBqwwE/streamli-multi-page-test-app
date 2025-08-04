@@ -328,41 +328,54 @@ else:
         else:
             selected_metric = st.sidebar.radio('線の濃さに反映する指標', metric_labels, index=0)
         
-        all_labels = [f"{i+1}. {ALL_ASSETS_NAME_MAP.get(t, t)} ({t})" for i, t in enumerate(sorted_tickers_by_abs)]
+        # --- ★★★ここからが状態管理の修正箇所★★★ ---
         
-        if 'selected_labels' not in st.session_state or 'market_selection_memory' not in st.session_state or st.session_state.market_selection_memory != market_selection:
-            st.session_state.selected_labels = all_labels
+        # 1. パフォーマンス順にソートされた「表示用ラベル」のリストを作成
+        all_labels = [f"{i+1}. {ALL_ASSETS_NAME_MAP.get(t, t)} ({t})" for i, t in enumerate(sorted_tickers_by_abs)]
+
+        # 2. st.session_stateを「ティッカー」基準で管理
+        # 市場が切り替わった時、または初回起動時に、選択中のティッカーを初期化
+        if 'selected_tickers' not in st.session_state or 'market_selection_memory' not in st.session_state or st.session_state.market_selection_memory != market_selection:
+            st.session_state.selected_tickers = sorted_tickers_by_abs
             st.session_state.market_selection_memory = market_selection
 
         st.sidebar.write("---")
         st.sidebar.write("**表示銘柄の一括選択**")
         
+        # 3. ボタンは「選択ティッカーのリスト」を操作するように変更
         cols = st.sidebar.columns(2)
         if cols[0].button('米国のみ', use_container_width=True):
-            st.session_state.selected_labels = [l for l in all_labels if l.split('(')[-1].replace(')', '') in ALL_US_TICKERS]
+            st.session_state.selected_tickers = [t for t in sorted_tickers_by_abs if t in ALL_US_TICKERS]
         if cols[1].button('日本のみ', use_container_width=True):
-            st.session_state.selected_labels = [l for l in all_labels if l.split('(')[-1].replace(')', '') in ALL_JP_TICKERS]
+            st.session_state.selected_tickers = [t for t in sorted_tickers_by_abs if t in ALL_JP_TICKERS]
         
         cols = st.sidebar.columns(2)
         if cols[0].button('すべて選択', use_container_width=True):
-            st.session_state.selected_labels = all_labels
+            st.session_state.selected_tickers = sorted_tickers_by_abs
         if cols[1].button('すべて解除', use_container_width=True):
-            st.session_state.selected_labels = []
+            st.session_state.selected_tickers = []
+        
+        # 4. multiselectのdefault引数を、保存されたティッカーから動的に生成
+        # これにより、ランキングが変わっても選択が維持される
+        tickers_to_select = st.session_state.get('selected_tickers', [])
+        default_labels = [label for label in all_labels if label.split('(')[-1].replace(')', '') in tickers_to_select]
 
         selected_labels = st.sidebar.multiselect(
             '**表示する銘柄（絶対パフォーマンス順）**', 
             options=all_labels, 
-            default=st.session_state.selected_labels
+            default=default_labels
         )
-        if selected_labels != st.session_state.selected_labels:
-             st.session_state.selected_labels = selected_labels
         
-        selected_tickers = [label.split('(')[-1].replace(')', '') for label in selected_labels]
+        # 5. multiselectの操作結果（ラベル）を「ティッカー」に変換して保存し直す
+        current_selected_tickers = [label.split('(')[-1].replace(')', '') for label in selected_labels]
+        st.session_state.selected_tickers = current_selected_tickers
+        
+        # --- ★★★状態管理の修正ここまで★★★ ---
 
         st.header(chart_title)
         chart_fig = create_chart(
             performance_to_plot, strength_dfs, final_absolute_performance,
-            selected_metric, selected_tickers,
+            selected_metric, current_selected_tickers, # ★選択中のティッカーを渡す
             chart_title, y_label, baseline,
             target_tickers, month_separator_date
         )
@@ -374,14 +387,15 @@ else:
         perf_df['累積リターン'] = perf_df['累積リターン'].apply(lambda x: f"{x:.2%}")
         perf_df['銘柄名'] = [ALL_ASSETS_NAME_MAP.get(idx, idx) for idx in perf_df.index]
         perf_df = perf_df.reindex(columns=['銘柄名', '累積リターン'])
-        st.dataframe(perf_df.loc[selected_tickers], use_container_width=True)
+        # ★表示する銘柄のみをテーブルに表示
+        st.dataframe(perf_df.loc[[t for t in sorted_tickers_by_abs if t in current_selected_tickers]], use_container_width=True)
         
         if selected_metric and strength_dfs.get(selected_metric) is not None:
             st.header(f'指標データ: {selected_metric}')
             strength_df_to_display = strength_dfs.get(selected_metric)
             if not strength_df_to_display.empty:
                 display_df = strength_df_to_display.reindex(absolute_cumulative_returns.index).dropna(how='all', axis=0).copy()
-                display_df = display_df[[ticker for ticker in sorted_tickers_by_abs if ticker in selected_tickers]]
+                display_df = display_df[[ticker for ticker in sorted_tickers_by_abs if ticker in current_selected_tickers]]
                 display_df.columns = [f"{ALL_ASSETS_NAME_MAP.get(c, c)} ({c})" for c in display_df.columns]
                 st.dataframe(display_df.sort_index(ascending=False).style.format("{:.2f}", na_rep="-"))
     else:
