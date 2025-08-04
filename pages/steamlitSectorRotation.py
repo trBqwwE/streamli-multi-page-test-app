@@ -194,31 +194,44 @@ else:
 
     if data:
         cumulative_returns, strength_dfs, final_performance, sorted_tickers = data
-        metric_labels = list(strength_dfs.keys())
-        if not metric_labels:
-            st.sidebar.warning("利用可能な指標がありません。")
-            selected_metric = None
+                
+        # データが2日分未満の場合は警告を表示し、グラフ描画をスキップ
+        if len(cumulative_returns) < 2:
+            st.warning("表示期間が短すぎるため、チャートを描画できません。少なくとも2営業日以上の期間を選択してください。")
+        
+        # データが2日分以上ある場合のみ、グラフと関連情報を表示
         else:
-            selected_metric = st.sidebar.radio('線の濃さに反映する指標', metric_labels, index=0)
-        sector_labels = [f"{i+1}. {SECTOR_NAME_MAP.get(t, t)} ({t})" for i, t in enumerate(sorted_tickers)]
-        selected_labels = st.sidebar.multiselect('表示するセクター（パフォーマンス順）', options=sector_labels, default=sector_labels)
-        selected_tickers = [label.split('(')[-1].replace(')', '') for label in selected_labels]
-        st.header('セクター別 累積リターン')
-        chart_fig = create_chart(cumulative_returns, strength_dfs, final_performance, sorted_tickers, selected_metric, selected_tickers, title_period_text, month_separator_date)
-        st.pyplot(chart_fig)
-        st.header('パフォーマンスランキング')
-        st.markdown(f"**期間:** {title_period_text}")
-        perf_df = final_performance.to_frame(name='累積リターン')
-        perf_df['累積リターン'] = perf_df['累積リターン'].apply(lambda x: f"{x:.2%}")
-        perf_df['セクター名'] = [SECTOR_NAME_MAP.get(idx, idx) for idx in perf_df.index]
-        perf_df = perf_df[['セクター名', '累積リターン']]
-        st.dataframe(perf_df, use_container_width=True)
-        if selected_metric and strength_dfs.get(selected_metric) is not None:
-            st.header(f'指標データ: {selected_metric}')
-            strength_df = strength_dfs.get(selected_metric)
-            if not strength_df.empty:
-                display_df = strength_df.reindex(cumulative_returns.index).dropna(how='all').copy()
-                display_df.columns = [f"{SECTOR_NAME_MAP.get(c, c)} ({c})" for c in display_df.columns]
-                st.dataframe(display_df.sort_index(ascending=False).style.format("{:.2f}", na_rep="-"))
+            metric_labels = list(strength_dfs.keys())
+            if not metric_labels:
+                st.sidebar.warning("利用可能な指標がありません。")
+                selected_metric = None
+            else:
+                selected_metric = st.sidebar.radio('線の濃さに反映する指標', metric_labels, index=0)
+            
+            sector_labels = [f"{i+1}. {SECTOR_NAME_MAP.get(t, t)} ({t})" for i, t in enumerate(sorted_tickers)]
+            selected_labels = st.sidebar.multiselect('表示するセクター（パフォーマンス順）', options=sector_labels, default=sector_labels)
+            selected_tickers = [label.split('(')[-1].replace(')', '') for label in selected_labels]
+
+            st.header('セクター別 累積リターン')
+            chart_fig = create_chart(cumulative_returns, strength_dfs, final_performance, sorted_tickers, selected_metric, selected_tickers, title_period_text, month_separator_date)
+            st.pyplot(chart_fig)
+            
+            st.header('パフォーマンスランキング')
+            st.markdown(f"**期間:** {title_period_text}")
+            perf_df = final_performance.to_frame(name='累積リターン')
+            perf_df['累積リターン'] = perf_df['累積リターン'].apply(lambda x: f"{x:.2%}")
+            perf_df['セクター名'] = [SECTOR_NAME_MAP.get(idx, idx) for idx in perf_df.index]
+            perf_df = perf_df[['セクター名', '累積リターン']]
+            st.dataframe(perf_df, use_container_width=True)
+            
+            if selected_metric and strength_dfs.get(selected_metric) is not None:
+                st.header(f'指標データ: {selected_metric}')
+                strength_df = strength_dfs.get(selected_metric)
+                if not strength_df.empty:
+                    display_df = strength_df.reindex(cumulative_returns.index).dropna(how='all').copy()
+                    display_df.columns = [f"{SECTOR_NAME_MAP.get(c, c)} ({c})" for c in display_df.columns]
+                    st.dataframe(display_df.sort_index(ascending=False).style.format("{:.2f}", na_rep="-"))
+   
     else:
         st.error("データを表示できませんでした。期間を変更するか、時間を置いてから再度お試しください。")
+
