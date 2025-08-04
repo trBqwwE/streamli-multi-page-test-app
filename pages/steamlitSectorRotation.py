@@ -41,43 +41,38 @@ def calculate_rsi(series: pd.Series, length: int = 14) -> pd.Series:
 def get_data_and_indicators(start_date, end_date):
     """
     指定された期間の株価データを取得し、各種指標を計算する関数。
+    yfinanceライブラリに接続処理を完全に任せます。
     """
-    # 以前のyfinanceデータ取得エラー対策も残しておきます
-    import requests
-    session = requests.Session()
-    session.headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36'
-    
-    try:
-        yf.Ticker("MSFT", session=session).history(period="1d")
-        time.sleep(0.5)
-    except Exception:
-        pass
-
     strength_dfs = {}
     chart_index = pd.date_range(start=start_date, end=end_date, freq='B')
 
     try:
-        df_daily_full = yf.download(US_SECTOR_TICKERS, start=start_date - pd.DateOffset(days=60), end=end_date, auto_adjust=True, progress=False, session=session)
+        # session= の指定をすべて削除
+        df_daily_full = yfinance.download(
+            US_SECTOR_TICKERS, 
+            start=start_date - pd.DateOffset(days=60), 
+            end=end_date, 
+            auto_adjust=True, 
+            progress=False
+        )
         if df_daily_full.empty:
-            st.error("日足データの取得に失敗しました。")
+            st.error("日足データの取得に失敗しました。ティッカーが無効か、一時的なネットワーク問題の可能性があります。")
             return None
     except Exception as e:
-        st.error(f"データ取得中にエラーが発生しました: {e}")
+        st.error(f"日足データの取得中に予期せぬエラーが発生しました: {e}")
         return None
 
     df_daily_chart = df_daily_full.loc[start_date:end_date].copy()
 
-    # --- ここから指標計算を自前のコードに置き換え ---
+    # --- 指標計算 (変更なし) ---
     try:
         close_prices = df_daily_full['Close']
         volume_data = df_daily_full['Volume']
         
-        # (RSI) 自作のRSI関数を使用
         all_rsi_series = [calculate_rsi(close_prices[ticker]).rename(ticker) for ticker in US_SECTOR_TICKERS if ticker in close_prices]
         if all_rsi_series:
             strength_dfs['RSI (日足14)'] = pd.concat(all_rsi_series, axis=1).reindex(chart_index, method='ffill')
         
-        # (出来高急増率) これは元々pandasだけで計算していたので変更なし
         all_volume_series = []
         for ticker in US_SECTOR_TICKERS:
             if ticker in volume_data:
@@ -92,11 +87,18 @@ def get_data_and_indicators(start_date, end_date):
     except Exception as e:
         st.warning(f"日足指標の計算中にエラーが発生しました: {e}")
 
-    # (5分足VWAP) この部分は変更なし
     try:
-        df_intraday = yf.download(US_SECTOR_TICKERS, start=start_date, end=end_date, interval='5m', group_by='ticker', progress=False, timeout=60, session=session)
+        # session= の指定をすべて削除
+        df_intraday = yfinance.download(
+            US_SECTOR_TICKERS, 
+            start=start_date, 
+            end=end_date, 
+            interval='5m', 
+            group_by='ticker', 
+            progress=False, 
+            timeout=60
+        )
         if not df_intraday.empty and isinstance(df_intraday.columns, pd.MultiIndex):
-            # (VWAP計算ロジックは長いので省略...元のコードと同じです)
             daily_results = []
             for ticker in US_SECTOR_TICKERS:
                 if ticker in df_intraday.columns:
@@ -241,3 +243,4 @@ else:
                 st.dataframe(display_df.sort_index(ascending=False).style.format("{:.2f}", na_rep="-"))
     else:
         st.error("データを表示できませんでした。期間を変更するか、時間を置いてから再度お試しください。")
+
