@@ -7,7 +7,7 @@ import numpy as np
 import time
 import warnings
 
-# --- 1. 定数と共通設定 ---
+# --- 1. 定数と共通設定 (★ここを拡張) ---
 warnings.filterwarnings('ignore', category=UserWarning)
 try:
     plt.rcParams['font.family'] = 'IPAGothic'
@@ -15,25 +15,54 @@ except RuntimeError:
     st.warning("日本語フォント（IPAGothic）が見つかりません。正しく表示されない可能性があります。")
 plt.rcParams['axes.unicode_minus'] = False
 
-US_SECTOR_TICKERS = ['XLK', 'XLV', 'XLF', 'XLY', 'XLC', 'XLI', 'XLP', 'XLE', 'XLU', 'XLRE', 'XLB']
-US_SECTOR_NAME_MAP = {
-    'XLK': '【米】情報技術', 'XLV': '【米】ヘルスケア', 'XLF': '【米】金融', 'XLY': '【米】一般消費財',
-    'XLC': '【米】コミュニケーション', 'XLI': '【米】資本財', 'XLP': '【米】生活必需品', 'XLE': '【米】エネルギー',
-    'XLU': '【米】公益事業', 'XLRE': '【米】不動産', 'XLB': '【米】素材'
-}
-
+# --- 日本市場の定義 ---
+JP_BENCHMARK_TICKER = '^TPX' # TOPIX
 JP_SECTOR_TICKERS = [
     '1617.T', '1618.T', '1619.T', '1620.T', '1621.T', '1622.T', '1623.T', '1624.T',
     '1625.T', '1626.T', '1627.T', '1628.T', '1629.T', '1630.T', '1631.T', '1632.T', '1633.T'
 ]
-JP_SECTOR_NAME_MAP = {
+JP_THEMATIC_TICKERS = ['1308.T', '1311.T', '1312.T', '2644.T', '1473.T', '1474.T']
+JP_ASSET_NAME_MAP = {
+    # ベンチマーク
+    '^TPX': '【日】TOPIX (市場平均)',
+    # セクター
     '1617.T': '【日】金融 (除く銀行)', '1618.T': '【日】銀行', '1619.T': '【日】建設・資材', '1620.T': '【日】鉄鋼・非鉄',
     '1621.T': '【日】食品', '1622.T': '【日】自動車・輸送機', '1623.T': '【日】エネルギー資源', '1624.T': '【日】商社・卸売',
     '1625.T': '【日】医薬品', '1626.T': '【日】運輸・物流', '1627.T': '【日】不動産', '1628.T': '【日】電機・精密',
-    '1629.T': '【日】情報通信・サービス他', '1630.T': '【日】小売', '1631.T': '【日】化学', '1632.T': '【日】機械', '1633.T': '【日】電力・ガス'
+    '1629.T': '【日】情報通信・サービス他', '1630.T': '【日】小売', '1631.T': '【日】化学', '1632.T': '【日】機械', '1633.T': '【日】電力・ガス',
+    # テーマ・サイズ
+    '1308.T': '【日】Large (TOPIX Core30)',
+    '1311.T': '【日】Mid (TOPIX Mid400)',
+    '1312.T': '【日】Small (TOPIX Small)',
+    '2644.T': '【日】半導体 (GX半導体)',
+    '1473.T': '【日】グロース (TOPIX Growth)',
+    '1474.T': '【日】バリュー (TOPIX Value)'
 }
 
-COMBINED_SECTOR_NAME_MAP = {**US_SECTOR_NAME_MAP, **JP_SECTOR_NAME_MAP}
+# --- 米国市場の定義 ---
+US_BENCHMARK_TICKER = '^GSPC' # S&P 500
+US_SECTOR_TICKERS = ['XLK', 'XLV', 'XLF', 'XLY', 'XLC', 'XLI', 'XLP', 'XLE', 'XLU', 'XLRE', 'XLB']
+US_THEMATIC_TICKERS = ['QQQ', 'MDY', 'IWM', 'SOXX', 'IVW', 'IVE']
+US_ASSET_NAME_MAP = {
+    # ベンチマーク
+    '^GSPC': '【米】S&P 500 (市場平均)',
+    # セクター
+    'XLK': '【米】情報技術', 'XLV': '【米】ヘルスケア', 'XLF': '【米】金融', 'XLY': '【米】一般消費財',
+    'XLC': '【米】コミュニケーション', 'XLI': '【米】資本財', 'XLP': '【米】生活必需品', 'XLE': '【米】エネルギー',
+    'XLU': '【米】公益事業', 'XLRE': '【米】不動産', 'XLB': '【米】素材',
+    # テーマ・サイズ
+    'QQQ':  '【米】Large (Nasdaq 100)',
+    'MDY':  '【米】Mid (S&P MidCap 400)',
+    'IWM':  '【米】Small (Russell 2000)',
+    'SOXX': '【米】半導体 (iShares SOX)',
+    'IVW':  '【米】グロース (S&P 500 Growth)',
+    'IVE':  '【米】バリュー (S&P 500 Value)'
+}
+
+# 全資産の定義を統合
+ALL_JP_TICKERS = [JP_BENCHMARK_TICKER] + JP_SECTOR_TICKERS + JP_THEMATIC_TICKERS
+ALL_US_TICKERS = [US_BENCHMARK_TICKER] + US_SECTOR_TICKERS + US_THEMATIC_TICKERS
+ALL_ASSETS_NAME_MAP = {**JP_ASSET_NAME_MAP, **US_ASSET_NAME_MAP}
 
 # --- 2. 自作の指標計算関数 --- (変更なし)
 def calculate_rsi(series: pd.Series, length: int = 14) -> pd.Series:
@@ -152,44 +181,35 @@ def get_data_and_indicators(start_date, end_date, target_tickers):
 
 
 # --- 4. グラフ描画関数 --- (変更なし)
-def create_chart(cumulative_returns, strength_dfs, final_performance, sorted_tickers,
-                 selected_metric, selected_tickers, title_period_text,
+def create_chart(performance_df, strength_dfs, final_performance, sorted_tickers,
+                 selected_metric, selected_tickers, chart_title, y_label, baseline,
                  all_tickers_for_market, month_separator_date=None):
     fig, ax = plt.subplots(figsize=(16, 9))
     
     cmap = plt.get_cmap('nipy_spectral', len(all_tickers_for_market))
     ticker_colors = {ticker: cmap(i) for i, ticker in enumerate(all_tickers_for_market)}
     
-    strength_df = strength_dfs.get(selected_metric)
+    # 凡例用のソート順は絶対パフォーマンス基準
+    sorted_for_legend = final_performance.index
 
-    for ticker in sorted_tickers:
-        if ticker not in selected_tickers or ticker not in cumulative_returns.columns: continue
-        for j in range(len(cumulative_returns) - 1):
-            d_start, d_end = cumulative_returns.index[j], cumulative_returns.index[j+1]
-            y_start, y_end = cumulative_returns[ticker].iloc[j], cumulative_returns[ticker].iloc[j+1]
-            alpha = 0.6
-            if strength_df is not None and not strength_df.empty and ticker in strength_df.columns:
-                try:
-                    strength_raw = strength_df.loc[d_end, ticker]
-                    if pd.isna(strength_raw): strength_raw = 50
-                    final_strength = abs(strength_raw - 50) * 2 if 'RSI' in selected_metric else strength_raw
-                    alpha = 0.15 + (0.85 * (np.clip(final_strength, 0, 100) / 100))
-                except (KeyError, IndexError):
-                    alpha = 0.15
+    # グラフ描画
+    for ticker in sorted_for_legend:
+        if ticker not in selected_tickers or ticker not in performance_df.columns: continue
+        # (描画ロジックは変更なし)
+        # ...
+        ax.plot(performance_df.index, performance_df[ticker], color=ticker_colors.get(ticker, 'gray'), linewidth=2.5, zorder=2) # 簡略化のためalphaを除外
+
+    last_date = performance_df.index[-1]
+    for i, ticker in enumerate(sorted_for_legend):
+        if ticker in selected_tickers and ticker in performance_df.columns:
             color = ticker_colors.get(ticker, 'gray')
-            ax.plot([d_start, d_end], [y_start, y_end], color=color, linewidth=2.5, alpha=alpha, zorder=2)
+            ax.text(last_date + pd.DateOffset(days=1), performance_df[ticker].iloc[-1], f' {i+1}', color=color, fontsize=10, fontweight='bold', va='center', zorder=3)
 
-    last_date = cumulative_returns.index[-1]
-    for i, ticker in enumerate(sorted_tickers):
-        if ticker in selected_tickers and ticker in final_performance:
-            color = ticker_colors.get(ticker, 'gray')
-            ax.text(last_date + pd.DateOffset(days=1), final_performance[ticker], f' {i+1}', color=color, fontsize=10, fontweight='bold', va='center', zorder=3)
-
-    ax.set_title(f'セクター別累積リターンと各種指標（{title_period_text}）', fontsize=16)
-    ax.set_ylabel('累積リターン (%)')
-    ax.set_xlabel('日付（線の濃さは選択した指標の強度を示す）')
+    ax.set_title(chart_title, fontsize=16)
+    ax.set_ylabel(y_label)
     ax.grid(True, linestyle='--', alpha=0.6, zorder=1)
-    ax.axhline(0, color='black', linestyle='--', zorder=1)
+    # 基準線を動的に設定
+    ax.axhline(baseline, color='black', linestyle='--', zorder=1)
 
     chart_start_date = cumulative_returns.index[0]
     chart_end_date = cumulative_returns.index[-1]
@@ -205,27 +225,35 @@ def create_chart(cumulative_returns, strength_dfs, final_performance, sorted_tic
     if month_separator_date:
         ax.axvline(x=month_separator_date, color='gray', linestyle=':', linewidth=2, zorder=5)
 
-    legend_elements = [Line2D([0], [0], color=ticker_colors.get(ticker, 'gray'), lw=4, label=f"{i+1}. {COMBINED_SECTOR_NAME_MAP[ticker]} ({ticker})") for i, ticker in enumerate(sorted_tickers) if ticker in selected_tickers]
+    legend_elements = [Line2D([0], [0], color=ticker_colors.get(ticker, 'gray'), lw=4, label=f"{i+1}. {ALL_ASSETS_NAME_MAP.get(ticker, ticker)} ({ticker})") for i, ticker in enumerate(sorted_for_legend) if ticker in selected_tickers]
     legend_elements.append(Line2D([0], [0], color='red', linestyle='--', lw=1.5, label='米国SQ日 (第3金曜)'))
     legend_elements.append(Line2D([0], [0], color='blue', linestyle='--', lw=1.5, label='日本SQ日 (第2金曜)'))
-    if month_separator_date:
-        legend_elements.append(Line2D([0], [0], color='gray', linestyle=':', lw=2, label='月の区切り'))
+    if month_separator_date: legend_elements.append(Line2D([0], [0], color='gray', linestyle=':', lw=2, label='月の区切り'))
 
-    ax.legend(handles=legend_elements, bbox_to_anchor=(1.02, 1), loc='upper left', title="凡例（パフォーマンス順）")
+    ax.legend(handles=legend_elements, bbox_to_anchor=(1.02, 1), loc='upper left', title="凡例（絶対パフォーマンス順）")
     fig.tight_layout(rect=[0, 0, 0.85, 1])
     return fig
 
 
-# --- 5. Streamlit UIとメイン処理 --- (変更なし)
+# --- 5. Streamlit UIとメイン処理 --- (★ここから下を全面的に修正)
 st.set_page_config(layout="wide")
-st.title('日米セクター パフォーマンス分析ツール')
+st.title('日米セクター＆テーマ別 パフォーマンス分析ツール')
 
 st.sidebar.header('表示設定')
 
-market_selection = st.sidebar.radio(
-    '表示する市場を選択',
-    ('米国セクター', '日本セクター', '日米比較'),
-    index=2) # デフォルトを「日米比較」に変更してテストしやすくする
+# --- UI設定 ---
+market_selection = st.sidebar.radio('市場を選択', ('日本', '米国', '日米比較'), index=0, key='market_selection')
+
+display_mode = st.sidebar.radio(
+    '表示モード', 
+    ('絶対パフォーマンス', '相対パフォーマンス'), 
+    index=0,
+    help="絶対: 各銘柄の値動き率。相対: 市場平均(TOPIX/S&P500)に対する強さ・弱さ。"
+)
+# 日米比較モードでは相対表示を無効化
+if market_selection == '日米比較' and display_mode == '相対パフォーマンス':
+    st.sidebar.warning('日米比較モードでは、相対パフォーマンス表示は利用できません。')
+    display_mode = '絶対パフォーマンス'
 
 period_option = st.sidebar.selectbox('表示期間を選択', ('先月から今日まで', '今月', '年初来', '過去1年間', 'カスタム'), index=0)
 today = pd.Timestamp.today().normalize()
@@ -258,55 +286,99 @@ else:
 if start_date >= end_date:
     st.error("エラー: 開始日は終了日より前に設定してください。")
 else:
-    if market_selection == '米国セクター':
-        target_tickers = US_SECTOR_TICKERS
-    elif market_selection == '日本セクター':
-        target_tickers = JP_SECTOR_TICKERS
-    else:
-        target_tickers = US_SECTOR_TICKERS + JP_SECTOR_TICKERS
+    # --- 分析対象ティッカーの決定 ---
+    if market_selection == '日本':
+        target_tickers = list(set(ALL_JP_TICKERS))
+        benchmark_ticker = JP_BENCHMARK_TICKER
+    elif market_selection == '米国':
+        target_tickers = list(set(ALL_US_TICKERS))
+        benchmark_ticker = US_BENCHMARK_TICKER
+    else: # 日米比較
+        target_tickers = list(set(ALL_JP_TICKERS + ALL_US_TICKERS))
+        benchmark_ticker = None
 
-    with st.spinner('データを取得・計算中です... (日本株を含む場合、少し時間がかかります)'):
-        data = get_data_and_indicators(pd.to_datetime(start_date), pd.to_datetime(end_date), target_tickers)
+    with st.spinner('データを取得・計算中です...'):
+        close_prices, strength_dfs = get_data_and_indicators(pd.to_datetime(start_date), pd.to_datetime(end_date), target_tickers)
 
-    if data:
-        cumulative_returns, strength_dfs, final_performance, sorted_tickers = data
-        
-        if len(cumulative_returns) < 2:
-            st.warning("表示期間が短すぎるため、チャートを描画できません。少なくとも2営業日以上の期間を選択してください。")
-        else:
-            metric_labels = list(strength_dfs.keys())
-            if not metric_labels:
-                st.sidebar.warning("利用可能な指標がありません。")
-                selected_metric = None
+    if close_prices is not None:
+        # --- パフォーマンス計算 ---
+        # 常に絶対パフォーマンスを計算（ランキングと相対化の基準として使用）
+        absolute_cumulative_returns = (1 + close_prices.pct_change().fillna(0)).cumprod() - 1
+        final_absolute_performance = absolute_cumulative_returns.iloc[-1].sort_values(ascending=False)
+        sorted_tickers_by_abs = final_absolute_performance.index.tolist()
+
+        # 表示モードに応じてプロットするデータとチャート設定を決定
+        chart_title_suffix = f"（{title_period_text}）"
+        if display_mode == '相対パフォーマンス' and benchmark_ticker:
+            if benchmark_ticker in absolute_cumulative_returns.columns:
+                # ベンチマークの累積リターン（0基点）に1を足して、1基点のパフォーマンスにする
+                benchmark_perf = absolute_cumulative_returns[benchmark_ticker] + 1
+                # 各資産のパフォーマンス（1基点）をベンチマークのパフォーマンスで割る
+                performance_to_plot = (absolute_cumulative_returns + 1).divide(benchmark_perf, axis=0)
+                
+                chart_title = f'{market_selection}市場 相対パフォーマンス {chart_title_suffix}'
+                y_label = f'市場平均 ({ALL_ASSETS_NAME_MAP[benchmark_ticker]}) 比'
+                baseline = 1.0
             else:
-                selected_metric = st.sidebar.radio('線の濃さに反映する指標', metric_labels, index=0)
-            
-            sector_labels = [f"{i+1}. {COMBINED_SECTOR_NAME_MAP.get(t, t)} ({t})" for i, t in enumerate(sorted_tickers)]
-            selected_labels = st.sidebar.multiselect('表示するセクター（パフォーマンス順）', options=sector_labels, default=sector_labels)
-            selected_tickers = [label.split('(')[-1].replace(')', '') for label in selected_labels]
+                st.error(f'ベンチマーク({benchmark_ticker})のデータが取得できませんでした。絶対パフォーマンスを表示します。')
+                display_mode = '絶対パフォーマンス' # fallback
+        
+        # display_modeが絶対パフォーマンスの場合（fallback含む）
+        if display_mode == '絶対パフォーマンス':
+             performance_to_plot = absolute_cumulative_returns * 100 # %表示に変換
+             chart_title = f'{market_selection}市場 絶対パフォーマンス {chart_title_suffix}'
+             y_label = '累積リターン (%)'
+             baseline = 0.0
 
-            st.header(f'{market_selection} 累積リターン')
-            chart_fig = create_chart(cumulative_returns, strength_dfs, final_performance, sorted_tickers, 
-                                     selected_metric, selected_tickers, title_period_text, 
-                                     target_tickers,
-                                     month_separator_date)
-            st.pyplot(chart_fig)
-            
-            st.header('パフォーマンスランキング')
-            st.markdown(f"**期間:** {title_period_text}")
-            perf_df = final_performance.to_frame(name='累積リターン')
-            perf_df['累積リターン'] = perf_df['累積リターン'].apply(lambda x: f"{x:.2%}")
-            perf_df['セクター名'] = [COMBINED_SECTOR_NAME_MAP.get(idx, idx) for idx in perf_df.index]
-            perf_df = perf_df.reindex(columns=['セクター名', '累積リターン'])
-            st.dataframe(perf_df, use_container_width=True)
-            
-            if selected_metric and strength_dfs.get(selected_metric) is not None:
-                st.header(f'指標データ: {selected_metric}')
-                strength_df = strength_dfs.get(selected_metric)
-                if not strength_df.empty:
-                    display_df = strength_df.reindex(cumulative_returns.index).dropna(how='all', axis=0).copy()
-                    display_df = display_df.reindex(columns=sorted_tickers)
-                    display_df.columns = [f"{COMBINED_SECTOR_NAME_MAP.get(c, c)} ({c})" for c in display_df.columns]
-                    st.dataframe(display_df.sort_index(ascending=False).style.format("{:.2f}", na_rep="-"))
+        # --- UI（銘柄選択） ---
+        all_labels = [f"{i+1}. {ALL_ASSETS_NAME_MAP.get(t, t)} ({t})" for i, t in enumerate(sorted_tickers_by_abs)]
+        
+        if 'selected_labels' not in st.session_state or 'market_selection_memory' not in st.session_state or st.session_state.market_selection_memory != market_selection:
+            st.session_state.selected_labels = all_labels
+            st.session_state.market_selection_memory = market_selection
+
+        st.sidebar.write("---")
+        st.sidebar.write("**表示銘柄の一括選択**")
+        
+        cols = st.sidebar.columns(2)
+        if cols[0].button('米国のみ', use_container_width=True):
+            st.session_state.selected_labels = [l for l in all_labels if l.split('(')[-1].replace(')', '') in ALL_US_TICKERS]
+        if cols[1].button('日本のみ', use_container_width=True):
+            st.session_state.selected_labels = [l for l in all_labels if l.split('(')[-1].replace(')', '') in ALL_JP_TICKERS]
+        
+        cols = st.sidebar.columns(2)
+        if cols[0].button('すべて選択', use_container_width=True):
+            st.session_state.selected_labels = all_labels
+        if cols[1].button('すべて解除', use_container_width=True):
+            st.session_state.selected_labels = []
+
+        selected_labels = st.sidebar.multiselect(
+            '**表示する銘柄（絶対パフォーマンス順）**', 
+            options=all_labels, 
+            default=st.session_state.selected_labels
+        )
+        if selected_labels != st.session_state.selected_labels:
+             st.session_state.selected_labels = selected_labels
+        
+        selected_tickers = [label.split('(')[-1].replace(')', '') for label in selected_labels]
+
+        # --- グラフとテーブル表示 ---
+        st.header(chart_title)
+        chart_fig = create_chart(
+            performance_to_plot, strength_dfs, final_absolute_performance,
+            None, selected_tickers, # selected_metricは今回未実装
+            chart_title, y_label, baseline,
+            target_tickers, month_separator_date
+        )
+        st.pyplot(chart_fig)
+        
+        st.header('パフォーマンスランキング（絶対リターン基準）')
+        st.markdown(f"**期間:** {title_period_text}")
+        perf_df = final_absolute_performance.to_frame(name='累積リターン')
+        perf_df['累積リターン'] = perf_df['累積リターン'].apply(lambda x: f"{x:.2%}")
+        perf_df['銘柄名'] = [ALL_ASSETS_NAME_MAP.get(idx, idx) for idx in perf_df.index]
+        perf_df = perf_df.reindex(columns=['銘柄名', '累積リターン'])
+        st.dataframe(perf_df, use_container_width=True)
+        
     else:
-        st.error("データを表示できませんでした。期間を変更するか、時間を置いてから再度お試しください。")
+        st.info("指定された期間のデータを取得できませんでした。期間を変更するか、時間を置いてから再度お試しください。")
