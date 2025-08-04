@@ -44,7 +44,7 @@ def calculate_rsi(series: pd.Series, length: int = 14) -> pd.Series:
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
-# --- 3. データ取得と計算（キャッシュ活用） --- (★ここを修正)
+# --- 3. データ取得と計算（キャッシュ活用） --- (変更なし)
 @st.cache_data(ttl=3600)
 def get_data_and_indicators(start_date, end_date, target_tickers):
     import yfinance as yf
@@ -73,7 +73,6 @@ def get_data_and_indicators(start_date, end_date, target_tickers):
 
     df_daily_chart = df_daily_full.loc[start_date:end_date].copy()
 
-    # (日足指標計算ロジックは変更なし)
     try:
         close_prices = df_daily_full['Close']
         volume_data = df_daily_full['Volume']
@@ -95,7 +94,6 @@ def get_data_and_indicators(start_date, end_date, target_tickers):
     except Exception as e:
         st.warning(f"日足指標の計算中にエラーが発生しました: {e}")
 
-    # (日中足VWAP指標計算ロジックは変更なし)
     try:
         df_intraday = yf.download(
             target_tickers,
@@ -127,23 +125,15 @@ def get_data_and_indicators(start_date, end_date, target_tickers):
     except Exception as e:
         st.warning(f"日中足VWAP指標の計算に失敗しました: {e}")
 
-    # --- ここからが修正箇所 ---
-    # 祝日の違いによるデータ欠損に対応するため、検証ロジックを変更
-    # 期間中に2日以上の有効な価格データを持つティッカーのみを対象とする
     close_prices_chart = df_daily_chart['Close']
     valid_tickers = close_prices_chart.columns[close_prices_chart.notna().sum() > 1]
 
-    if not valid_tickers.any(): # .any() を使ってティッカーが一つでも存在するか確認
+    if not valid_tickers.any():
         st.error("選択された期間に有効な価格データを持つセクターがありません。（2日以上のデータを持つセクターが見つかりません）")
         return None
 
-    # 有効なティッカーのデータのみを使用
     close_prices_valid = close_prices_chart[valid_tickers]
-
-    # 変化率を計算し、NaN（祝日などで発生）を0で埋める
-    # これにより、データがない日はリターン0%として扱われ、累積計算が継続される
     cumulative_returns = (1 + close_prices_valid.pct_change().fillna(0)).cumprod() - 1
-    # --- 修正箇所ここまで ---
 
     final_performance = cumulative_returns.iloc[-1].sort_values(ascending=False)
     sorted_tickers = final_performance.index.tolist()
@@ -216,7 +206,7 @@ def create_chart(cumulative_returns, strength_dfs, final_performance, sorted_tic
     return fig
 
 
-# --- 5. Streamlit UIとメイン処理 --- (変更なし)
+# --- 5. Streamlit UIとメイン処理 --- (★ここを修正)
 st.set_page_config(layout="wide")
 st.title('日米セクター パフォーマンス分析ツール')
 
@@ -225,7 +215,7 @@ st.sidebar.header('表示設定')
 market_selection = st.sidebar.radio(
     '表示する市場を選択',
     ('米国セクター', '日本セクター', '日米比較'),
-    index=2) # デフォルトを「日米比較」に変更してテストしやすくする
+    index=2) 
 
 period_option = st.sidebar.selectbox('表示期間を選択', ('先月から今日まで', '今月', '年初来', '過去1年間', 'カスタム'), index=0)
 today = pd.Timestamp.today().normalize()
@@ -281,8 +271,49 @@ else:
             else:
                 selected_metric = st.sidebar.radio('線の濃さに反映する指標', metric_labels, index=0)
             
+            # パフォーマンス順にソートされたラベルを生成
             sector_labels = [f"{i+1}. {COMBINED_SECTOR_NAME_MAP.get(t, t)} ({t})" for i, t in enumerate(sorted_tickers)]
-            selected_labels = st.sidebar.multiselect('表示するセクター（パフォーマンス順）', options=sector_labels, default=sector_labels)
+            
+            # --- セクター選択UIの機能改善 ---
+            # st.session_state で選択状態を管理
+            if 'selected_labels' not in st.session_state:
+                st.session_state.selected_labels = sector_labels  # 初期状態はすべて選択
+
+            st.sidebar.write("---")
+            st.sidebar.write("**セクター一括選択**")
+            
+            # ボタンの配置とロジック
+            cols = st.sidebar.columns(2)
+            if cols[0].button('米国のみ', use_container_width=True, key='select_us'):
+                st.session_state.selected_labels = [
+                    label for label in sector_labels 
+                    if label.split('(')[-1].replace(')', '') in US_SECTOR_TICKERS
+                ]
+            if cols[1].button('日本のみ', use_container_width=True, key='select_jp'):
+                st.session_state.selected_labels = [
+                    label for label in sector_labels
+                    if label.split('(')[-1].replace(')', '') in JP_SECTOR_TICKERS
+                ]
+            
+            cols = st.sidebar.columns(2)
+            if cols[0].button('すべて選択', use_container_width=True, key='select_all'):
+                st.session_state.selected_labels = sector_labels
+            if cols[1].button('すべて解除', use_container_width=True, key='deselect_all'):
+                st.session_state.selected_labels = []
+
+            # multiselectウィジェット
+            # default引数にsession_stateの値を設定
+            # 返り値を再度session_stateに保存することで、手動変更をキャッチする
+            selected_labels = st.sidebar.multiselect(
+                '**表示するセクター（パフォーマンス順）**', 
+                options=sector_labels, 
+                default=st.session_state.selected_labels
+            )
+            # ユーザーの手動操作をセッション状態に反映
+            if selected_labels != st.session_state.selected_labels:
+                 st.session_state.selected_labels = selected_labels
+            # --- ここまでがUI改善部分 ---
+
             selected_tickers = [label.split('(')[-1].replace(')', '') for label in selected_labels]
 
             st.header(f'{market_selection} 累積リターン')
@@ -305,7 +336,9 @@ else:
                 strength_df = strength_dfs.get(selected_metric)
                 if not strength_df.empty:
                     display_df = strength_df.reindex(cumulative_returns.index).dropna(how='all', axis=0).copy()
-                    display_df = display_df.reindex(columns=sorted_tickers)
+                    # 表示するセクターのみをテーブルに表示
+                    display_tickers_sorted = [ticker for ticker in sorted_tickers if ticker in selected_tickers]
+                    display_df = display_df.reindex(columns=display_tickers_sorted)
                     display_df.columns = [f"{COMBINED_SECTOR_NAME_MAP.get(c, c)} ({c})" for c in display_df.columns]
                     st.dataframe(display_df.sort_index(ascending=False).style.format("{:.2f}", na_rep="-"))
     else:
