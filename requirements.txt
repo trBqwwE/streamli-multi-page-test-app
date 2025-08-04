@@ -2,7 +2,5 @@ streamlit
 yfinance
 pandas
 matplotlib
-git+https://github.com/twopirllc/pandas-ta.git
 numpy
 tzdata
-setuptools
