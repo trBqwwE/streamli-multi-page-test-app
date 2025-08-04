@@ -41,13 +41,18 @@ def calculate_rsi(series: pd.Series, length: int = 14) -> pd.Series:
 def get_data_and_indicators(start_date, end_date):
     """
     指定された期間の株価データを取得し、各種指標を計算する関数。
-    yfinanceライブラリに接続処理を完全に任せます。
     """
+    # ------------------ ここから修正 ------------------
+    import yfinance as yf  # 👈 この行を関数の「中」の先頭に追加
+    import time            # 👈 この行も関数の「中」に移動
+    
+    # yfinanceライブラリに接続処理を完全に任せます。
+    # ------------------ ここまで修正 ------------------
+
     strength_dfs = {}
     chart_index = pd.date_range(start=start_date, end=end_date, freq='B')
 
     try:
-        # session= の指定をすべて削除
         df_daily_full = yfinance.download(
             US_SECTOR_TICKERS, 
             start=start_date - pd.DateOffset(days=60), 
@@ -88,7 +93,6 @@ def get_data_and_indicators(start_date, end_date):
         st.warning(f"日足指標の計算中にエラーが発生しました: {e}")
 
     try:
-        # session= の指定をすべて削除
         df_intraday = yfinance.download(
             US_SECTOR_TICKERS, 
             start=start_date, 
@@ -243,4 +247,5 @@ else:
                 st.dataframe(display_df.sort_index(ascending=False).style.format("{:.2f}", na_rep="-"))
     else:
         st.error("データを表示できませんでした。期間を変更するか、時間を置いてから再度お試しください。")
+
 
