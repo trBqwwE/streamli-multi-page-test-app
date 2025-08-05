@@ -39,32 +39,27 @@ if start_date > end_date:
 try:
     data = yf.download(ticker, start=start_date, end=end_date + timedelta(days=1))
     
-    # ★★★★★★★★★★★★★★★★ 修正箇所 ★★★★★★★★★★★★★★★★
-    # yfinanceが稀に文字列を返すことがあるため、データ型を強制的に数値に変換する
-    
-    # 1. 対象となるカラムのデータ型を強制的に数値に変換
-    #    変換できない値は NaN (Not a Number) になる (errors='coerce')
-    cols_to_numeric = ['Open', 'High', 'Low', 'Close', 'Volume']
-    for col in cols_to_numeric:
-        data[col] = pd.to_numeric(data[col], errors='coerce')
+    # データが存在する場合のみ、前処理を実行
+    if not data.empty:
+        # 1. 対象となるカラムのデータ型を強制的に数値に変換
+        cols_to_numeric = ['Open', 'High', 'Low', 'Close', 'Volume']
+        for col in cols_to_numeric:
+            data[col] = pd.to_numeric(data[col], errors='coerce')
 
-    # 2. NaNが含まれる行を削除する
-    data.dropna(inplace=True)
-    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        # 2. NaNが含まれる行を削除する
+        data.dropna(inplace=True)
 
-    if data.empty:
-        st.warning(f"{selected_pair_name} のデータが取得できませんでした。期間や為替ペア、または日付を調整してください。")
+    # ★★★★★★★★★★★★★★★★ 修正箇所① ★★★★★★★★★★★★★★★★
+    # 前処理後のデータフレームが空、または行が少なすぎる場合のチェックを強化
+    if data.empty or len(data) < 1:
+        st.warning(f"指定された期間に有効なデータが存在しません。期間や為替ペアを再設定してください。")
         st.stop()
+    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
     # --- メインコンテンツの表示 ---
     st.subheader(f"{selected_pair_name} のチャート")
-    
-    # デバッグ用にデータ型情報を表示したい場合は、以下のコメントを外してください
-    # st.subheader("データ型情報 (デバッグ用)")
-    # st.write(data.info())
-    # st.write(data.head())
 
-
+    # mplfinanceで描画
     fig, _ = mpf.plot(
         data,
         type='candle',
@@ -76,10 +71,18 @@ try:
         mav=(5, 25),
         returnfig=True
     )
-    st.pyplot(fig)
+
+    # ★★★★★★★★★★★★★★★★ 修正箇所② ★★★★★★★★★★★★★★★★
+    # figオブジェクトが正常に生成されたかを確認してから表示する
+    if fig:
+        st.pyplot(fig)
+    else:
+        st.error("チャートの描画に失敗しました。データが不十分である可能性があります。")
+    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
     st.subheader("取得データ")
     st.dataframe(data.style.format("{:.4f}"))
 
 except Exception as e:
-    st.error(f"データの取得または描画中にエラーが発生しました: {e}")
+    # ユーザーに見せるエラーメッセージをより具体的に
+    st.error(f"処理中に予期せぬエラーが発生しました: {e}")
