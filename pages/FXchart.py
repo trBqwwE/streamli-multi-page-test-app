@@ -4,7 +4,7 @@ import yfinance as yf
 import matplotlib.pyplot as plt
 import numpy as np # pandasやmatplotlibの内部でよく使われます
 from datetime import datetime, timedelta
-
+import japanize_matplotlib
 # --- Streamlit アプリの基本設定 ---
 st.set_page_config(
     page_title="為替レート可視化アプリ (Matplotlib版)",
