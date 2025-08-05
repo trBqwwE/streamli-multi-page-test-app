@@ -9,53 +9,16 @@ import numpy as np
 # --- Streamlit ページ設定 ---
 st.set_page_config(layout="wide")
 st.title("💹 為替レート・COTペア分析チャート")
-st.info("チャート下に、選択した通貨ペアを構成する2通貨の力関係を分析したCOTレポートが表示されます。")
+st.info("サイドバーで2つの通貨を選択すると、通貨の順番を自動で判別し、正しい通貨ペアとして分析を実行します。")
 
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-# --- 設定データ (通貨ペアを大幅に拡充) ---
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-SYMBOL_MAP = {
-    # EUR pairs
-    "ユーロ/米ドル (EURUSD)": "EURUSD=X", "ユーロ/円 (EURJPY)": "EURJPY=X",
-    "ユーロ/ポンド (EURGBP)": "EURGBP=X", "ユーロ/豪ドル (EURAUD)": "EURAUD=X",
-    "ユーロ/カナダドル (EURCAD)": "EURCAD=X", "ユーロ/スイスフラン (EURCHF)": "EURCHF=X",
-    # GBP pairs
-    "ポンド/米ドル (GBPUSD)": "GBPUSD=X", "ポンド/円 (GBPJPY)": "GBPJPY=X",
-    "ポンド/豪ドル (GBPAUD)": "GBPAUD=X", "ポンド/カナダドル (GBPCAD)": "GBPCAD=X",
-    "ポンド/スイスフラン (GBPCHF)": "GBPCHF=X",
-    # AUD pairs
-    "豪ドル/米ドル (AUDUSD)": "AUDUSD=X", "豪ドル/円 (AUDJPY)": "AUDJPY=X",
-    "豪ドル/カナダドル (AUDCAD)": "AUDCAD=X", "豪ドル/スイスフラン (AUDCHF)": "AUDCHF=X",
-    # USD pairs
-    "米ドル/円 (USDJPY)": "JPY=X", "米ドル/カナダドル (USDCAD)": "CAD=X",
-    "米ドル/スイスフラン (USDCHF)": "CHF=X",
-    # Other Cross pairs
-    "カナダドル/円 (CADJPY)": "CADJPY=X", "スイスフラン/円 (CHFJPY)": "CHFJPY=X",
-}
-
-COT_ASSET_MAP = {
-    # EUR pairs
-    "ユーロ/米ドル (EURUSD)": ("ユーロ", "米ドル"), "ユーロ/円 (EURJPY)": ("ユーロ", "日本円"),
-    "ユーロ/ポンド (EURGBP)": ("ユーロ", "英ポンド"), "ユーロ/豪ドル (EURAUD)": ("ユーロ", "豪ドル"),
-    "ユーロ/カナダドル (EURCAD)": ("ユーロ", "カナダドル"), "ユーロ/スイスフラン (EURCHF)": ("ユーロ", "スイスフラン"),
-    # GBP pairs
-    "ポンド/米ドル (GBPUSD)": ("英ポンド", "米ドル"), "ポンド/円 (GBPJPY)": ("英ポンド", "日本円"),
-    "ポンド/豪ドル (GBPAUD)": ("英ポンド", "豪ドル"), "ポンド/カナダドル (GBPCAD)": ("英ポンド", "カナダドル"),
-    "ポンド/スイスフラン (GBPCHF)": ("英ポンド", "スイスフラン"),
-    # AUD pairs
-    "豪ドル/米ドル (AUDUSD)": ("豪ドル", "米ドル"), "豪ドル/円 (AUDJPY)": ("豪ドル", "日本円"),
-    "豪ドル/カナダドル (AUDCAD)": ("豪ドル", "カナダドル"), "豪ドル/スイスフラン (AUDCHF)": ("豪ドル", "スイスフラン"),
-    # USD pairs
-    "米ドル/円 (USDJPY)": ("米ドル", "日本円"), "米ドル/カナダドル (USDCAD)": ("米ドル", "カナダドル"),
-    "米ドル/スイスフラン (USDCHF)": ("米ドル", "スイスフラン"),
-    # Other Cross pairs
-    "カナダドル/円 (CADJPY)": ("カナダドル", "日本円"), "スイスフラン/円 (CHFJPY)": ("スイスフラン", "日本円"),
-}
-
+# --- 設定データ ---
+CURRENCY_HIERARCHY = ["EUR", "GBP", "AUD", "USD", "CAD", "CHF", "JPY"]
+CURRENCY_NAMES = {"EUR": "ユーロ", "USD": "米ドル", "JPY": "日本円", "GBP": "英ポンド", "AUD": "豪ドル", "CAD": "カナダドル", "CHF": "スイスフラン"}
+COT_ASSET_NAMES = {"EUR": "ユーロ", "USD": "米ドル", "JPY": "日本円", "GBP": "英ポンド", "AUD": "豪ドル", "CAD": "カナダドル", "CHF": "スイスフラン"}
 TIMEZONE_MAP = {"日本時間 (JST)": "Asia/Tokyo", "米国東部時間 (EST/EDT)": "America/New_York", "協定世界時 (UTC)": "UTC"}
 LOOKBACK_WEEKS = 26
 
-# --- データ取得・処理関数 (変更なし) ---
+# --- データ取得・処理関数 ---
 @st.cache_data(ttl=3600)
 def get_prepared_cot_data():
     df = cot.cot_all(cot_report_type='legacy_fut')
@@ -71,7 +34,7 @@ def get_prepared_cot_data():
     df = df.sort_values(by=['Name', 'Date'])
     return df
 
-# --- 分析関数 (変更なし) ---
+# --- 分析関数 ---
 def get_cot_index(series, lookback):
     rolling_min = series.rolling(window=lookback).min()
     rolling_max = series.rolling(window=lookback).max()
@@ -85,31 +48,70 @@ def analyze_currency_pair(base_asset, quote_asset, all_cot_data):
         latest = asset_df.iloc[-1]
         results[position_type] = {"通貨名": asset_name, "投機筋ネットポジション": latest['NonComm_Net'], "投機筋COT指数": get_cot_index(asset_df['NonComm_Net'], LOOKBACK_WEEKS).iloc[-1], "実需筋ネットポジション": latest['Comm_Net'], "実需筋COT指数": get_cot_index(asset_df['Comm_Net'], LOOKBACK_WEEKS).iloc[-1]}
     base_score, quote_score = results["ベース通貨"]["投機筋COT指数"], results["クオート通貨"]["投機筋COT指数"]
-    pair_score = quote_score - base_score if base_asset == "米ドル" else base_score - quote_score
+    pair_score = base_score - quote_score
     df = pd.DataFrame(results).T
     df["ペア総合スコア"] = [pair_score, np.nan]
     return df
 
-# --- メイン処理 (変更なし) ---
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+# --- 新しいヘルパー関数: 通貨ペアの正規化 ---
+# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+def get_standard_pair(ccy1, ccy2):
+    """2つの通貨から、市場の慣例に基づいた標準的な通貨ペアと、反転が必要かを返す"""
+    if CURRENCY_HIERARCHY.index(ccy1) < CURRENCY_HIERARCHY.index(ccy2):
+        return ccy1, ccy2, False # (ベース, クオート, 反転なし)
+    else:
+        return ccy2, ccy1, True # (ベース, クオート, 反転あり)
+
+# --- メイン処理 ---
 def main():
     st.sidebar.header("チャート設定")
-    selected_symbol_name = st.sidebar.selectbox("為替ペアを選択", list(SYMBOL_MAP.keys()))
+    col1, col2 = st.sidebar.columns(2)
+    with col1:
+        ccy1 = st.selectbox("通貨1", CURRENCY_HIERARCHY, index=0)
+    with col2:
+        ccy2 = st.selectbox("通貨2", CURRENCY_HIERARCHY, index=1)
+
     selected_tz_name = st.sidebar.selectbox("表示タイムゾーン", list(TIMEZONE_MAP.keys()), index=0)
     today = datetime.now().date()
     start_date = st.sidebar.date_input("開始日", today - timedelta(days=365))
     end_date = st.sidebar.date_input("終了日", today)
 
-    if start_date >= end_date:
-        st.sidebar.error("エラー: 終了日は開始日より後の日付にしてください。")
-        st.stop()
+    if ccy1 == ccy2:
+        st.sidebar.error("異なる通貨を選択してください。"); st.stop()
+
+    # --- 通貨ペアの正規化と動的な名称生成 ---
+    standard_base, standard_quote, is_inverted = get_standard_pair(ccy1, ccy2)
+    
+    # yfinance用のティッカーを生成
+    yfinance_ticker = f"{standard_base}{standard_quote}=X"
+    # yfinanceの特殊ルールに対応 (USDがベースの場合)
+    if standard_base == 'USD':
+        yfinance_ticker = f"{standard_quote}=X"
+
+    # ユーザーが選択した通りの表示名を作成
+    user_selected_pair_name = f"{ccy1}/{ccy2}"
 
     try:
-        symbol, selected_tz = SYMBOL_MAP[selected_symbol_name], TIMEZONE_MAP[selected_tz_name]
-        intraday_data_utc = yf.download(tickers=symbol, start=start_date, end=end_date + timedelta(days=1), interval="1h", progress=False)
+        # --- 価格データの取得 ---
+        intraday_data_utc = yf.download(tickers=yfinance_ticker, start=start_date, end=end_date + timedelta(days=1), interval="1h", progress=False)
 
-        if intraday_data_utc.empty: st.warning("指定された期間の価格データを取得できませんでした。"); st.stop()
+        if intraday_data_utc.empty: st.warning(f"価格データを取得できませんでした。ティッカー: {yfinance_ticker}"); st.stop()
         if isinstance(intraday_data_utc.columns, pd.MultiIndex): intraday_data_utc.columns = intraday_data_utc.columns.droplevel(1)
         
+        # --- 価格データの反転処理 ---
+        if is_inverted:
+            # 1をデータで割る。高値と安値は入れ替える必要がある
+            inverted_data = pd.DataFrame()
+            inverted_data['Open'] = 1 / intraday_data_utc['Open']
+            inverted_data['High'] = 1 / intraday_data_utc['Low'] # 安値が反転後の高値に
+            inverted_data['Low'] = 1 / intraday_data_utc['High']  # 高値が反転後の安値に
+            inverted_data['Close'] = 1 / intraday_data_utc['Close']
+            inverted_data['Volume'] = intraday_data_utc['Volume'] # Volumeはそのまま
+            intraday_data_utc = inverted_data
+
+        # --- 日足への変換とチャート描画 (変更なし) ---
+        selected_tz = TIMEZONE_MAP[selected_tz_name]
         intraday_data_local = intraday_data_utc.tz_convert(selected_tz)
         ohlc_dict = {'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}
         price_data = intraday_data_local.resample('D').agg(ohlc_dict).dropna()
@@ -119,30 +121,32 @@ def main():
         price_data['MA25'] = price_data['Close'].rolling(window=25).mean()
         price_data['MA75'] = price_data['Close'].rolling(window=75).mean()
         
-        st.header(f"{selected_symbol_name} 価格チャート")
+        st.header(f"{user_selected_pair_name} 価格チャート")
         fig = go.Figure(data=[go.Candlestick(x=price_data.index, open=price_data['Open'], high=price_data['High'], low=price_data['Low'], close=price_data['Close'], name='ローソク足')])
         fig.add_trace(go.Scatter(x=price_data.index, y=price_data['MA25'], mode='lines', name='25日移動平均線', line=dict(color='orange', width=1.5)))
         fig.add_trace(go.Scatter(x=price_data.index, y=price_data['MA75'], mode='lines', name='75日移動平均線', line=dict(color='purple', width=1.5)))
         fig.update_layout(height=500, xaxis_rangeslider_visible=False, margin=dict(t=30, b=30), legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"))
         st.plotly_chart(fig, use_container_width=True)
 
-        st.header(f"COTペア分析: {selected_symbol_name}")
-        base_asset, quote_asset = COT_ASSET_MAP.get(selected_symbol_name, (None, None))
+        # --- COT分析の表示 (ユーザーの選択に合わせてbase/quoteを渡す) ---
+        st.header(f"COTペア分析: {user_selected_pair_name}")
+        base_asset_cot = COT_ASSET_NAMES.get(ccy1)
+        quote_asset_cot = COT_ASSET_NAMES.get(ccy2)
         
-        if base_asset and quote_asset:
+        if base_asset_cot and quote_asset_cot:
             with st.spinner('COTレポートデータを取得・分析中...'):
                 all_cot_data = get_prepared_cot_data()
-                analysis_df = analyze_currency_pair(base_asset, quote_asset, all_cot_data)
+                analysis_df = analyze_currency_pair(base_asset_cot, quote_asset_cot, all_cot_data)
             
             if analysis_df is not None:
-                st.info(f"**ペア総合スコア: {analysis_df.loc['ベース通貨', 'ペア総合スコア']:.1f}** (正の値はベース通貨が優勢、負の値はクオート通貨が優勢を示唆)")
+                st.info(f"**ペア総合スコア: {analysis_df.loc['ベース通貨', 'ペア総合スコア']:.1f}** (正の値は {ccy1} が優勢、負の値は {ccy2} が優勢を示唆)")
                 def style_score(val): return f'color: {"green" if val > 0 else "red"}' if isinstance(val, (int, float)) else ''
                 st.dataframe(analysis_df.style.format({"投機筋ネットポジション": "{:,.0f}", "実需筋ネットポジション": "{:,.0f}", "投機筋COT指数": "{:.1f}", "実需筋COT指数": "{:.1f}", "ペア総合スコア": "{:.1f}"}, na_rep="---").applymap(style_score, subset=['ペア総合スコア']), use_container_width=True)
             else: st.warning("分析に必要なCOTデータが不足しています。")
         else: st.info("この為替ペアに対応する直接的なCOTデータはありません。")
 
     except Exception as e:
-        st.error("予期せぬエラーが発生しました。"); st.exception(e)
+        st.error(f"予期せぬエラーが発生しました（選択した通貨ペアの価格データをyfinanceが提供していない可能性があります）。"); st.exception(e)
 
 if __name__ == '__main__':
     main()
