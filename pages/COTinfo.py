@@ -3,10 +3,7 @@ import cot_reports as cot
 import pandas as pd
 import datetime
 import yfinance as yf
-import warnings
 
-# yfinanceからの将来の警告を非表示にする
-warnings.filterwarnings("ignore", category=FutureWarning)
 
 # --------------------------------------------------------------------------
 # --- Streamlit ページ設定 ---
