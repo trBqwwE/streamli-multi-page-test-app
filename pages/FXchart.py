@@ -9,10 +9,9 @@ import numpy as np
 # --- Streamlit ページ設定 ---
 st.set_page_config(layout="wide")
 st.title("💹 為替レート・COTペア分析チャート")
-st.info("サイドバーで2つの通貨を選択すると、通貨の順番を自動で判別し、正しい通貨ペアとして分析を実行します。")
+st.info("サイドバーで2つの通貨を選択すると、市場で標準的な通貨ペアを自動で判別し、そのチャートと分析結果を表示します。")
 
 # --- 設定データ ---
-# 市場での慣例的な通貨の序列 (この順番がベース通貨の優先順位となる)
 CURRENCY_HIERARCHY = ["EUR", "GBP", "AUD", "USD", "CAD", "CHF", "JPY"]
 COT_ASSET_NAMES = {"EUR": "ユーロ", "USD": "米ドル", "JPY": "日本円", "GBP": "英ポンド", "AUD": "豪ドル", "CAD": "カナダドル", "CHF": "スイスフラン"}
 TIMEZONE_MAP = {"日本時間 (JST)": "Asia/Tokyo", "米国東部時間 (EST/EDT)": "America/New_York", "協定世界時 (UTC)": "UTC"}
@@ -46,25 +45,17 @@ def analyze_currency_pair(base_asset, quote_asset, all_cot_data):
     df = pd.DataFrame(results).T; df["ペア総合スコア"] = [pair_score, np.nan]
     return df
 
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-# --- 修正・改善されたヘルパー関数 ---
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+# --- ヘルパー関数 (変更なし) ---
 def get_pair_info(ccy1, ccy2):
-    """2つの通貨から、市場の標準ペア、反転フラグ、yfinanceティッカーを返す"""
-    # 通貨の序列に基づき、標準的なベース通貨とクオート通貨を決定
     if CURRENCY_HIERARCHY.index(ccy1) < CURRENCY_HIERARCHY.index(ccy2):
-        standard_base, standard_quote, is_inverted = ccy1, ccy2, False
+        standard_base, standard_quote = ccy1, ccy2
     else:
-        standard_base, standard_quote, is_inverted = ccy2, ccy1, True
-
-    # yfinance用のティッカーを生成
-    # USDがベース通貨の場合のみ、ティッカー形式が特殊 (例: JPY=X)
-    if standard_base == 'USD':
-        yfinance_ticker = f"{standard_quote}=X"
-    else:
-        yfinance_ticker = f"{standard_base}{standard_quote}=X"
+        standard_base, standard_quote = ccy2, ccy1
+    
+    yfinance_ticker = f"{standard_base}{standard_quote}=X"
+    if standard_base == 'USD': yfinance_ticker = f"{standard_quote}=X"
         
-    return standard_base, standard_quote, is_inverted, yfinance_ticker
+    return standard_base, standard_quote, yfinance_ticker
 
 # --- メイン処理 ---
 def main():
@@ -81,51 +72,43 @@ def main():
     if ccy1 == ccy2: st.sidebar.error("異なる通貨を選択してください。"); st.stop()
 
     # --- 通貨ペアの正規化と動的な名称生成 ---
-    standard_base, standard_quote, is_inverted, yfinance_ticker = get_pair_info(ccy1, ccy2)
-    user_selected_pair_name = f"{ccy1}/{ccy2}"
+    standard_base, standard_quote, yfinance_ticker = get_pair_info(ccy1, ccy2)
+    standard_pair_name = f"{standard_base}/{standard_quote}"
 
-    # --- デバッグ情報の表示 ---
     with st.sidebar.expander("デバッグ情報"):
-        st.write(f"ユーザー選択: `{user_selected_pair_name}`")
-        st.write(f"市場標準ペア: `{standard_base}/{standard_quote}`")
-        st.write(f"価格を反転表示: `{'はい' if is_inverted else 'いいえ'}`")
+        st.write(f"ユーザー選択: `{ccy1}` と `{ccy2}`")
+        st.write(f"市場標準ペア: `{standard_pair_name}`")
         st.write(f"使用ティッカー: `{yfinance_ticker}`")
 
     try:
-        # --- 価格データの取得 ---
+        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        # --- 価格データの取得 (反転処理を完全に削除) ---
+        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
         intraday_data_utc = yf.download(tickers=yfinance_ticker, start=start_date, end=end_date + timedelta(days=1), interval="1h", progress=False)
         if intraday_data_utc.empty: st.warning(f"価格データを取得できませんでした。"); st.stop()
         if isinstance(intraday_data_utc.columns, pd.MultiIndex): intraday_data_utc.columns = intraday_data_utc.columns.droplevel(1)
         
-        # --- 価格データの反転処理 ---
-        if is_inverted:
-            inverted_data = pd.DataFrame()
-            inverted_data['Open'] = 1 / intraday_data_utc['Open']
-            inverted_data['High'] = 1 / intraday_data_utc['Low']; inverted_data['Low'] = 1 / intraday_data_utc['High']
-            inverted_data['Close'] = 1 / intraday_data_utc['Close']; inverted_data['Volume'] = intraday_data_utc['Volume']
-            intraday_data_utc = inverted_data
-
-        # --- 日足への変換とチャート描画 ---
         selected_tz = TIMEZONE_MAP[selected_tz_name]
         price_data = intraday_data_utc.tz_convert(selected_tz).resample('D').agg({'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}).dropna()
         if price_data.empty: st.warning("データ処理の結果、表示できる価格データがありませんでした。"); st.stop()
 
         price_data['MA25'] = price_data['Close'].rolling(window=25).mean(); price_data['MA75'] = price_data['Close'].rolling(window=75).mean()
         
-        st.header(f"{user_selected_pair_name} 価格チャート")
+        # --- UI表示 (タイトルを標準ペアに統一) ---
+        st.header(f"{standard_pair_name} 価格チャート")
         fig = go.Figure(data=[go.Candlestick(x=price_data.index, open=price_data['Open'], high=price_data['High'], low=price_data['Low'], close=price_data['Close'], name='ローソク足')])
         fig.add_trace(go.Scatter(x=price_data.index, y=price_data['MA25'], mode='lines', name='25日移動平均線', line=dict(color='orange', width=1.5)))
         fig.add_trace(go.Scatter(x=price_data.index, y=price_data['MA75'], mode='lines', name='75日移動平均線', line=dict(color='purple', width=1.5)))
         fig.update_layout(height=500, xaxis_rangeslider_visible=False, margin=dict(t=30, b=30), legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"))
         st.plotly_chart(fig, use_container_width=True)
 
-        # --- COT分析の表示 ---
-        st.header(f"COTペア分析: {user_selected_pair_name}")
-        base_asset_cot, quote_asset_cot = COT_ASSET_NAMES.get(ccy1), COT_ASSET_NAMES.get(ccy2)
+        # --- COT分析の表示 (分析対象を標準ペアに統一) ---
+        st.header(f"COTペア分析: {standard_pair_name}")
+        base_asset_cot, quote_asset_cot = COT_ASSET_NAMES.get(standard_base), COT_ASSET_NAMES.get(standard_quote)
         if base_asset_cot and quote_asset_cot:
             with st.spinner('COTレポートデータを取得・分析中...'): analysis_df = analyze_currency_pair(base_asset_cot, quote_asset_cot, get_prepared_cot_data())
             if analysis_df is not None:
-                st.info(f"**ペア総合スコア: {analysis_df.loc['ベース通貨', 'ペア総合スコア']:.1f}** (正の値は {ccy1} が優勢、負の値は {ccy2} が優勢を示唆)")
+                st.info(f"**ペア総合スコア: {analysis_df.loc['ベース通貨', 'ペア総合スコア']:.1f}** (正の値は {standard_base} が優勢、負の値は {standard_quote} が優勢を示唆)")
                 def style_score(val): return f'color: {"green" if val > 0 else "red"}' if isinstance(val, (int, float)) else ''
                 st.dataframe(analysis_df.style.format({"投機筋ネットポジション": "{:,.0f}", "実需筋ネットポジション": "{:,.0f}", "投機筋COT指数": "{:.1f}", "実需筋COT指数": "{:.1f}", "ペア総合スコア": "{:.1f}"}, na_rep="---").applymap(style_score, subset=['ペア総合スコア']), use_container_width=True)
             else: st.warning("分析に必要なCOTデータが不足しています。")
