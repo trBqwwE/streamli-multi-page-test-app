@@ -1,12 +1,8 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-import mplfinance as mpf # mplfinanceをインポート
+import mplfinance as mpf
 from datetime import datetime, timedelta
-
-# 日本語表示は不要になるため、japanize_matplotlibとmatplotlib.pyplotは削除またはコメントアウトしてもOK
-# import japanize_matplotlib
-# import matplotlib.pyplot as plt
 
 # --- Streamlit アプリの基本設定 ---
 st.set_page_config(
@@ -43,17 +39,31 @@ if start_date > end_date:
 try:
     data = yf.download(ticker, start=start_date, end=end_date + timedelta(days=1))
     
-    # ★★★★★ 修正箇所 ★★★★★
-    # 欠損値(NaN)が含まれる行を削除する
+    # ★★★★★★★★★★★★★★★★ 修正箇所 ★★★★★★★★★★★★★★★★
+    # yfinanceが稀に文字列を返すことがあるため、データ型を強制的に数値に変換する
+    
+    # 1. 対象となるカラムのデータ型を強制的に数値に変換
+    #    変換できない値は NaN (Not a Number) になる (errors='coerce')
+    cols_to_numeric = ['Open', 'High', 'Low', 'Close', 'Volume']
+    for col in cols_to_numeric:
+        data[col] = pd.to_numeric(data[col], errors='coerce')
+
+    # 2. NaNが含まれる行を削除する
     data.dropna(inplace=True)
-    # ★★★★★★★★★★★★★★★★
+    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
     if data.empty:
-        st.warning(f"{selected_pair_name} のデータが取得できませんでした。期間や為替ペアを確認してください。")
+        st.warning(f"{selected_pair_name} のデータが取得できませんでした。期間や為替ペア、または日付を調整してください。")
         st.stop()
 
     # --- メインコンテンツの表示 ---
     st.subheader(f"{selected_pair_name} のチャート")
+    
+    # デバッグ用にデータ型情報を表示したい場合は、以下のコメントを外してください
+    # st.subheader("データ型情報 (デバッグ用)")
+    # st.write(data.info())
+    # st.write(data.head())
+
 
     fig, _ = mpf.plot(
         data,
