@@ -37,7 +37,7 @@ def get_cot_index(series, lookback):
     return (series - rolling_min) / (rolling_max - rolling_min) * 100
 
 def analyze_currency_pair_snapshot(base_asset, quote_asset, all_cot_data):
-    results = {}
+    results = {};
     for asset_name in [base_asset, quote_asset]:
         asset_df = all_cot_data[all_cot_data['Name'] == asset_name];
         if len(asset_df) < LOOKBACK_WEEKS: return None
@@ -60,30 +60,27 @@ def analyze_score_history(base_asset, quote_asset, all_cot_data):
     merged_df['週次変化'] = merged_df['ペア総合スコア'].diff()
     return merged_df[['ペア総合スコア', '週次変化']].dropna().sort_index(ascending=False)
 
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-# --- 新しい分析関数: COTと価格の時系列を統合 ---
-# ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 def create_cot_price_history_table(base_asset, quote_asset, ticker, start_date, end_date, all_cot_data):
-    # 1. COTデータの準備
     base_cot = all_cot_data[all_cot_data['Name'] == base_asset].drop_duplicates(subset='Date', keep='last').set_index('Date')
     quote_cot = all_cot_data[all_cot_data['Name'] == quote_asset].drop_duplicates(subset='Date', keep='last').set_index('Date')
     if len(base_cot) < LOOKBACK_WEEKS or len(quote_cot) < LOOKBACK_WEEKS: return None
 
-    # 2. 価格データの準備 (日足)
     price_history = get_daily_price_data(ticker, start_date, end_date + timedelta(days=1))
     if price_history.empty: return None
 
-    # 3. COTデータと価格データを日付で結合
+    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    # --- 修正箇所: 価格データのタイムゾーン情報を削除して結合を正しく行う ---
+    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+    price_history.index = price_history.index.tz_localize(None)
+
     combined = base_cot.join(price_history['Close'], how='left').rename(columns={'Close': '為替終値'})
     combined['投機筋Net(ベース)'] = combined['NonComm_Net']
     combined['投機筋Net(クオート)'] = quote_cot['NonComm_Net']
     
-    # 4. ペア総合スコアの計算
     combined['投機筋Idx(ベース)'] = get_cot_index(combined['投機筋Net(ベース)'], LOOKBACK_WEEKS)
     combined['投機筋Idx(クオート)'] = get_cot_index(combined['投機筋Net(クオート)'], LOOKBACK_WEEKS)
     combined['ペア総合スコア'] = combined['投機筋Idx(ベース)'] - combined['投機筋Idx(クオート)']
     
-    # 5. 表示する列を選択し、整形
     result_df = combined[['為替終値', 'ペア総合スコア', '投機筋Net(ベース)', '投機筋Net(クオート)']].dropna().sort_index(ascending=False)
     return result_df
 
@@ -109,7 +106,7 @@ def main():
     standard_pair_name = f"{standard_base}/{standard_quote}"
 
     try:
-        # 価格チャート表示 (変更なし)
+        # 価格チャート表示
         intraday_data_utc = yf.download(tickers=yfinance_ticker, start=start_date, end=end_date + timedelta(days=1), interval="1h", progress=False)
         if intraday_data_utc.empty: st.warning(f"価格データを取得できませんでした。"); st.stop()
         if isinstance(intraday_data_utc.columns, pd.MultiIndex): intraday_data_utc.columns = intraday_data_utc.columns.droplevel(1)
@@ -131,7 +128,7 @@ def main():
                 all_cot_data = get_prepared_cot_data()
                 snapshot_df = analyze_currency_pair_snapshot(base_asset_cot, quote_asset_cot, all_cot_data)
                 history_df = analyze_score_history(base_asset_cot, quote_asset_cot, all_cot_data)
-                price_history_df = create_cot_price_history_table(base_asset_cot, quote_asset_cot, yfinance_ticker, start_date - timedelta(days=365), end_date, all_cot_data) # 計算用に少し長くデータを取る
+                price_history_df = create_cot_price_history_table(base_asset_cot, quote_asset_cot, yfinance_ticker, start_date - timedelta(days=365), end_date, all_cot_data)
 
             st.subheader("最新ポジションのスナップショット")
             if snapshot_df is not None:
@@ -146,22 +143,12 @@ def main():
                     return ''
                 st.dataframe(history_df.style.format("{:.1f}", na_rep="---").applymap(style_change, subset=['週次変化']), height=300, use_container_width=True)
             
-            # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-            # --- 新しいテーブル: COTと価格の同期 ---
-            # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
             st.subheader("COTスコアと為替終値の時系列")
             if price_history_df is not None:
-                st.dataframe(price_history_df.style.format({
-                    "為替終値": "{:.3f}",
-                    "ペア総合スコア": "{:.1f}",
-                    "投機筋Net(ベース)": "{:,.0f}",
-                    "投機筋Net(クオート)": "{:,.0f}",
-                }), height=300, use_container_width=True)
+                st.dataframe(price_history_df.style.format({'為替終値': '{:.3f}', 'ペア総合スコア': '{:.1f}', '投機筋Net(ベース)': '{:,.0f}', '投機筋Net(クオート)': '{:,.0f}'}), height=300, use_container_width=True)
             else:
                 st.warning("価格と同期した時系列分析に必要なデータが不足しています。")
-
         else: st.info("この為替ペアに対応する直接的なCOTデータはありません。")
-
     except Exception as e:
         st.error(f"予期せぬエラーが発生しました。"); st.exception(e)
 
