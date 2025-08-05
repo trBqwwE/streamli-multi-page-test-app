@@ -37,35 +37,48 @@ if start_date > end_date:
 
 # --- データ取得とエラー処理 ---
 try:
-    # 1. auto_adjust=False を指定して、'Open', 'High', 'Low', 'Close' 列を確実に取得
-    data = yf.download(
+    # 1. auto_adjust=False を指定
+    raw_data = yf.download(
         ticker,
         start=start_date,
         end=end_date + timedelta(days=1),
         auto_adjust=False
     )
 
-    if not data.empty:
-        # 2. 対象となるカラムのデータ型を強制的に数値に変換
-        cols_to_numeric = ['Open', 'High', 'Low', 'Close', 'Volume']
-        for col in cols_to_numeric:
-            if col in data.columns:
-                data[col] = pd.to_numeric(data[col], errors='coerce')
+    if raw_data.empty:
+        st.warning(f"指定された期間にデータが存在しません。")
+        st.stop()
 
-        # 3. NaNが含まれる行を削除する
-        data.dropna(inplace=True)
+    # ★★★★★★★★★★★★★★★★★★★ 最終修正箇所 ★★★★★★★★★★★★★★★★★★★
+    # --- データフレームの完全再構築 ---
+    # 2. 必要なカラムだけを明示的に抽出
+    required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+    data = raw_data[required_columns].copy()
+
+    # 3. インデックスを強制的に日付型に変換
+    data.index = pd.to_datetime(data.index)
+
+    # 4. 各列を強制的に数値型に変換
+    for col in required_columns:
+        data[col] = pd.to_numeric(data[col], errors='coerce')
+
+    # 5. 不正な行を削除
+    data.dropna(inplace=True)
+    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
     if data.empty:
-        st.warning(f"指定された期間に有効なデータが存在しません。期間や為替ペアを再設定してください。")
+        st.warning(f"指定された期間に有効なデータが存在しませんでした（市場の休日など）。")
         st.stop()
-    
-    # ★★★★★★★★★★★★★★★★ 修正箇所② (デバッグ情報) ★★★★★★★★★★★★★★★★
-    # グラフ描画前のデータ件数を表示
-    st.info(f"クリーニング後の有効なデータ件数: {len(data)}件")
-    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
     # --- メインコンテンツの表示 ---
     st.subheader(f"{selected_pair_name} のチャート")
+
+    # データ件数に応じて移動平均線の表示を制御
+    mav_options = []
+    if len(data) >= 5:
+        mav_options.append(5)
+    if len(data) >= 25:
+        mav_options.append(25)
 
     # mplfinanceで描画
     fig, _ = mpf.plot(
@@ -76,9 +89,7 @@ try:
         ylabel='Price',
         volume=True,
         ylabel_lower='Volume',
-        # ★★★★★★★★★★★★★★★★ 修正箇所① (Mavを無効化) ★★★★★★★★★★★★★★
-        # mav=(5, 25), # 原因切り分けのため、移動平均線の描画を一時的にコメントアウト
-        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        mav=mav_options if mav_options else None, # 件数が足りない場合はMAを表示しない
         returnfig=True
     )
 
