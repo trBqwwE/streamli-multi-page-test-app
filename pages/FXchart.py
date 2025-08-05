@@ -37,29 +37,32 @@ if start_date > end_date:
 
 # --- データ取得とエラー処理 ---
 try:
-    # ★★★★★★★★★★★★★★★★ 最終的な修正箇所 ★★★★★★★★★★★★★★★★
-    # auto_adjust=False を指定して、'Open', 'High', 'Low', 'Close' 列を確実に取得する
+    # 1. auto_adjust=False を指定して、'Open', 'High', 'Low', 'Close' 列を確実に取得
     data = yf.download(
         ticker,
         start=start_date,
         end=end_date + timedelta(days=1),
         auto_adjust=False
     )
-    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
-    # データが存在しない場合のチェック
-    if data.empty:
-        st.warning(f"指定された期間にデータが存在しません。期間や為替ペアを再設定してください。")
-        st.stop()
-        
-    # 欠損値(NaN)が含まれる行を削除する
-    data.dropna(inplace=True)
+    # データが存在する場合のみ、前処理を実行
+    if not data.empty:
+        # ★★★★★★★★★★★★★★★★★★★ 修正箇所 ★★★★★★★★★★★★★★★★★★★
+        # 2. 対象となるカラムのデータ型を強制的に数値に変換する処理を復活
+        #    変換できない値は NaN (Not a Number) になる (errors='coerce')
+        cols_to_numeric = ['Open', 'High', 'Low', 'Close', 'Volume']
+        for col in cols_to_numeric:
+            if col in data.columns: # 列が存在するか確認
+                data[col] = pd.to_numeric(data[col], errors='coerce')
+
+        # 3. NaNが含まれる行を削除する
+        data.dropna(inplace=True)
+        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
     # 前処理後にデータが空になった場合のチェック
     if data.empty:
-        st.warning(f"指定された期間に有効なデータが存在しません（市場の休日など）。期間を調整してください。")
+        st.warning(f"指定された期間に有効なデータが存在しません。期間や為替ペアを再設定してください。")
         st.stop()
-
 
     # --- メインコンテンツの表示 ---
     st.subheader(f"{selected_pair_name} のチャート")
