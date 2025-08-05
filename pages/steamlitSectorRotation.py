@@ -314,7 +314,7 @@ if market_selection == '日米比較' and display_mode == '相対パフォーマ
     st.sidebar.warning('日米比較モードでは、相対パフォーマンス表示は利用できません。')
     display_mode = '絶対パフォーマンス'
 
-period_option = st.sidebar.selectbox('表示期間を選択', ('先月から今日まで', '今月', '年初来', '過去1年間', 'カスタム'), index=0)
+period_option = st.sidebar.selectbox('表示期間を選択', ('先月から今日まで', '今月','過去1週間',  '年初来', '過去1年間', 'カスタム'), index=0)
 today = pd.Timestamp.today().normalize()
 month_separator_date = None
 
@@ -328,6 +328,10 @@ elif period_option == '今月':
     start_date = today.replace(day=1)
     end_date = today
     title_period_text = "今月"
+elif period_option == '過去1週間':
+    start_date = today - pd.DateOffset(weeks=1)
+    end_date = today
+    title_period_text = "過去1週間"
 elif period_option == '年初来':
     start_date = today.replace(day=1, month=1)
     end_date = today
@@ -455,3 +459,4 @@ else:
                 st.dataframe(display_df.sort_index(ascending=False).style.format("{:.2f}", na_rep="-"))
     # else:
     #     st.info("データを準備しています。サイドバーで表示期間を選択してください。")
+
