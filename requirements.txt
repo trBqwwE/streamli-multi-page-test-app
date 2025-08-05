@@ -7,8 +7,8 @@ tzdata
 curl-cffi
 websockets
 cot_reports
-datetime
 plotly
+
 
 
 
