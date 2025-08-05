@@ -4,6 +4,7 @@ import yfinance as yf
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import cot_reports as cot
+import numpy as np # numpyをインポート
 
 # --- Streamlit ページ設定 ---
 st.set_page_config(layout="wide")
@@ -16,20 +17,15 @@ SYMBOL_MAP = {
     "ポンド/米ドル (GBPUSD)": "GBPUSD=X", "豪ドル/米ドル (AUDUSD)": "AUDUSD=X",
     "米ドル/カナダドル (USDCAD)": "CAD=X", "米ドル/スイスフラン (USDCHF)": "CHF=X",
 }
-# 通貨ペアを構成する2つのCOTアセットにマッピング
 COT_ASSET_MAP = {
-    "ユーロ/米ドル (EURUSD)": ("ユーロ", "米ドル"),
-    "米ドル/円 (USDJPY)": ("米ドル", "日本円"),
-    "ポンド/米ドル (GBPUSD)": ("英ポンド", "米ドル"),
-    "豪ドル/米ドル (AUDUSD)": ("豪ドル", "米ドル"),
-    "米ドル/カナダドル (USDCAD)": ("米ドル", "カナダドル"),
-    "米ドル/スイスフラン (USDCHF)": ("米ドル", "スイスフラン"),
+    "ユーロ/米ドル (EURUSD)": ("ユーロ", "米ドル"), "米ドル/円 (USDJPY)": ("米ドル", "日本円"),
+    "ポンド/米ドル (GBPUSD)": ("英ポンド", "米ドル"), "豪ドル/米ドル (AUDUSD)": ("豪ドル", "米ドル"),
+    "米ドル/カナダドル (USDCAD)": ("米ドル", "カナダドル"), "米ドル/スイスフラン (USDCHF)": ("米ドル", "スイスフラン"),
 }
 TIMEZONE_MAP = {"日本時間 (JST)": "Asia/Tokyo", "米国東部時間 (EST/EDT)": "America/New_York", "協定世界時 (UTC)": "UTC"}
+LOOKBACK_WEEKS = 26
 
-LOOKBACK_WEEKS = 26 # COTインデックスの計算期間（週）
-
-# --- データ取得・処理関数 (キャッシュで高速化) ---
+# --- データ取得・処理関数 ---
 @st.cache_data(ttl=3600)
 def get_prepared_cot_data():
     df = cot.cot_all(cot_report_type='legacy_fut')
@@ -47,43 +43,38 @@ def get_prepared_cot_data():
 
 # --- 分析関数 ---
 def get_cot_index(series, lookback):
-    """0-100のCOTインデックスを計算する"""
     rolling_min = series.rolling(window=lookback).min()
     rolling_max = series.rolling(window=lookback).max()
     return (series - rolling_min) / (rolling_max - rolling_min) * 100
 
 def analyze_currency_pair(base_asset, quote_asset, all_cot_data):
-    """通貨ペアのCOT分析を行い、結果をデータフレームで返す"""
     results = {}
     for asset_name, position_type in [(base_asset, "ベース通貨"), (quote_asset, "クオート通貨")]:
         asset_df = all_cot_data[all_cot_data['Name'] == asset_name]
-        if len(asset_df) < LOOKBACK_WEEKS:
-            return None # データ不足の場合はNoneを返す
+        if len(asset_df) < LOOKBACK_WEEKS: return None
         
         latest = asset_df.iloc[-1]
-        noncomm_index = get_cot_index(asset_df['NonComm_Net'], LOOKBACK_WEEKS).iloc[-1]
-        comm_index = get_cot_index(asset_df['Comm_Net'], LOOKBACK_WEEKS).iloc[-1]
-        
         results[position_type] = {
             "通貨名": asset_name,
             "投機筋ネットポジション": latest['NonComm_Net'],
-            "投機筋COT指数": noncomm_index,
+            "投機筋COT指数": get_cot_index(asset_df['NonComm_Net'], LOOKBACK_WEEKS).iloc[-1],
             "実需筋ネットポジション": latest['Comm_Net'],
-            "実需筋COT指数": comm_index,
+            "実需筋COT指数": get_cot_index(asset_df['Comm_Net'], LOOKBACK_WEEKS).iloc[-1],
         }
     
-    # 通貨ペアとしての評価スコアを計算
     base_score = results["ベース通貨"]["投機筋COT指数"]
     quote_score = results["クオート通貨"]["投機筋COT指数"]
     
-    # USDJPYやUSDCADのような通貨がクオート側にあるペアの評価ロジックを反転
     if base_asset == "米ドル":
-        pair_score = quote_score - base_score # 例: USDCAD -> CADが弱い(スコア低) - USDが強い(スコア高) = 大きなマイナス -> USDCADは上昇
+        pair_score = quote_score - base_score
     else:
-        pair_score = base_score - quote_score # 例: EURUSD -> EURが強い(スコア高) - USDが弱い(スコア低) = 大きなプラス -> EURUSDは上昇
+        pair_score = base_score - quote_score
 
     df = pd.DataFrame(results).T
-    df["ペア総合スコア"] = [pair_score, "---"]
+    
+    # ★★★★★★★ 修正箇所① ★★★★★★★
+    # 文字列の"---"の代わりに、非数(np.nan)を入れる
+    df["ペア総合スコア"] = [pair_score, np.nan]
     
     return df
 
@@ -91,7 +82,7 @@ def analyze_currency_pair(base_asset, quote_asset, all_cot_data):
 def main():
     st.sidebar.header("チャート設定")
     selected_symbol_name = st.sidebar.selectbox("為替ペア", list(SYMBOL_MAP.keys()))
-    selected_tz_name = st.sidebar.selectbox("表示タイムゾーン", list(TIMEZONE_MAP.keys()), index=2) # デフォルトをUTCに
+    selected_tz_name = st.sidebar.selectbox("表示タイムゾーン", list(TIMEZONE_MAP.keys()), index=2)
     
     today = datetime.now().date()
     start_date = st.sidebar.date_input("開始日", today - timedelta(days=365))
@@ -102,16 +93,13 @@ def main():
         st.stop()
 
     try:
-        # --- 価格チャートの表示 (ロジックは前回と同じ) ---
         symbol = SYMBOL_MAP[selected_symbol_name]
-        selected_tz = TIMEZONE_MAP[selected_tz_name]
         price_data = yf.download(tickers=symbol, start=start_date, end=end_date + timedelta(days=1), progress=False)
         st.header(f"{selected_symbol_name} 価格チャート")
         fig = go.Figure(data=[go.Candlestick(x=price_data.index, open=price_data['Open'], high=price_data['High'], low=price_data['Low'], close=price_data['Close'], name='ローソク足')])
         fig.update_layout(height=500, xaxis_rangeslider_visible=False, margin=dict(t=30, b=30))
         st.plotly_chart(fig, use_container_width=True)
 
-        # --- COT分析の表示 ---
         st.header(f"COTペア分析: {selected_symbol_name}")
         base_asset, quote_asset = COT_ASSET_MAP.get(selected_symbol_name, (None, None))
         
@@ -123,20 +111,21 @@ def main():
             if analysis_df is not None:
                 st.info(f"**ペア総合スコア: {analysis_df.loc['ベース通貨', 'ペア総合スコア']:.1f}** (正の値はベース通貨が優勢、負の値はクオート通貨が優勢を示唆)")
                 
-                # スコアを色付けする関数
                 def style_score(val):
                     if isinstance(val, (int, float)):
-                        color = 'red' if val < 0 else 'green'
+                        color = 'green' if val > 0 else 'red'
                         return f'color: {color}'
                     return ''
-
+                
+                # ★★★★★★★ 修正箇所② ★★★★★★★
+                # .formatに na_rep="---" を追加し、NaNを"---"に置き換える
                 st.dataframe(analysis_df.style.format({
                     "投機筋ネットポジション": "{:,.0f}",
                     "実需筋ネットポジション": "{:,.0f}",
                     "投機筋COT指数": "{:.1f}",
                     "実需筋COT指数": "{:.1f}",
                     "ペア総合スコア": "{:.1f}"
-                }).applymap(style_score, subset=['ペア総合スコア']), use_container_width=True)
+                }, na_rep="---").applymap(style_score, subset=['ペア総合スコア']), use_container_width=True)
             else:
                 st.warning("分析に必要なCOTデータが不足しています。")
         else:
