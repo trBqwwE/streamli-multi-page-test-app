@@ -7,5 +7,5 @@ tzdata
 curl-cffi
 websockets
 cot_reports
-warnings
 datetime
+
