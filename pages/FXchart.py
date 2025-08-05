@@ -4,7 +4,7 @@ import yfinance as yf
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
 import cot_reports as cot
-import numpy as np # numpyをインポート
+import numpy as np
 
 # --- Streamlit ページ設定 ---
 st.set_page_config(layout="wide")
@@ -25,7 +25,7 @@ COT_ASSET_MAP = {
 TIMEZONE_MAP = {"日本時間 (JST)": "Asia/Tokyo", "米国東部時間 (EST/EDT)": "America/New_York", "協定世界時 (UTC)": "UTC"}
 LOOKBACK_WEEKS = 26
 
-# --- データ取得・処理関数 ---
+# --- データ取得・処理関数 (キャッシュで高速化) ---
 @st.cache_data(ttl=3600)
 def get_prepared_cot_data():
     df = cot.cot_all(cot_report_type='legacy_fut')
@@ -55,8 +55,7 @@ def analyze_currency_pair(base_asset, quote_asset, all_cot_data):
         
         latest = asset_df.iloc[-1]
         results[position_type] = {
-            "通貨名": asset_name,
-            "投機筋ネットポジション": latest['NonComm_Net'],
+            "通貨名": asset_name, "投機筋ネットポジション": latest['NonComm_Net'],
             "投機筋COT指数": get_cot_index(asset_df['NonComm_Net'], LOOKBACK_WEEKS).iloc[-1],
             "実需筋ネットポジション": latest['Comm_Net'],
             "実需筋COT指数": get_cot_index(asset_df['Comm_Net'], LOOKBACK_WEEKS).iloc[-1],
@@ -65,24 +64,18 @@ def analyze_currency_pair(base_asset, quote_asset, all_cot_data):
     base_score = results["ベース通貨"]["投機筋COT指数"]
     quote_score = results["クオート通貨"]["投機筋COT指数"]
     
-    if base_asset == "米ドル":
-        pair_score = quote_score - base_score
-    else:
-        pair_score = base_score - quote_score
+    if base_asset == "米ドル": pair_score = quote_score - base_score
+    else: pair_score = base_score - quote_score
 
     df = pd.DataFrame(results).T
-    
-    # ★★★★★★★ 修正箇所① ★★★★★★★
-    # 文字列の"---"の代わりに、非数(np.nan)を入れる
-    df["ペア総合スコア"] = [pair_score, np.nan]
-    
+    df["ペア総合スコア"] = [pair_score, np.nan] # エラー回避のためnp.nanを使用
     return df
 
 # --- メイン処理 ---
 def main():
     st.sidebar.header("チャート設定")
     selected_symbol_name = st.sidebar.selectbox("為替ペア", list(SYMBOL_MAP.keys()))
-    selected_tz_name = st.sidebar.selectbox("表示タイムゾーン", list(TIMEZONE_MAP.keys()), index=2)
+    selected_tz_name = st.sidebar.selectbox("表示タイムゾーン", list(TIMEZONE_MAP.keys()), index=0)
     
     today = datetime.now().date()
     start_date = st.sidebar.date_input("開始日", today - timedelta(days=365))
@@ -93,13 +86,36 @@ def main():
         st.stop()
 
     try:
+        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        # --- 価格データの取得と高精度な日足への変換（復活させたロジック） ---
+        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
         symbol = SYMBOL_MAP[selected_symbol_name]
-        price_data = yf.download(tickers=symbol, start=start_date, end=end_date + timedelta(days=1), progress=False)
+        selected_tz = TIMEZONE_MAP[selected_tz_name]
+
+        intraday_data_utc = yf.download(tickers=symbol, start=start_date, end=end_date + timedelta(days=1), interval="1h", progress=False)
+
+        if intraday_data_utc.empty:
+            st.warning("指定された期間の価格データを取得できませんでした。")
+            st.stop()
+        
+        if isinstance(intraday_data_utc.columns, pd.MultiIndex):
+            intraday_data_utc.columns = intraday_data_utc.columns.droplevel(1)
+
+        intraday_data_local = intraday_data_utc.tz_convert(selected_tz)
+        ohlc_dict = {'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last', 'Volume': 'sum'}
+        price_data = intraday_data_local.resample('D').agg(ohlc_dict).dropna()
+        
+        if price_data.empty:
+            st.warning("データ処理の結果、表示できる価格データがありませんでした。")
+            st.stop()
+
+        # --- 価格チャートの表示 ---
         st.header(f"{selected_symbol_name} 価格チャート")
         fig = go.Figure(data=[go.Candlestick(x=price_data.index, open=price_data['Open'], high=price_data['High'], low=price_data['Low'], close=price_data['Close'], name='ローソク足')])
         fig.update_layout(height=500, xaxis_rangeslider_visible=False, margin=dict(t=30, b=30))
         st.plotly_chart(fig, use_container_width=True)
 
+        # --- COT分析の表示 ---
         st.header(f"COTペア分析: {selected_symbol_name}")
         base_asset, quote_asset = COT_ASSET_MAP.get(selected_symbol_name, (None, None))
         
@@ -117,13 +133,9 @@ def main():
                         return f'color: {color}'
                     return ''
                 
-                # ★★★★★★★ 修正箇所② ★★★★★★★
-                # .formatに na_rep="---" を追加し、NaNを"---"に置き換える
                 st.dataframe(analysis_df.style.format({
-                    "投機筋ネットポジション": "{:,.0f}",
-                    "実需筋ネットポジション": "{:,.0f}",
-                    "投機筋COT指数": "{:.1f}",
-                    "実需筋COT指数": "{:.1f}",
+                    "投機筋ネットポジション": "{:,.0f}", "実需筋ネットポジション": "{:,.0f}",
+                    "投機筋COT指数": "{:.1f}", "実需筋COT指数": "{:.1f}",
                     "ペア総合スコア": "{:.1f}"
                 }, na_rep="---").applymap(style_score, subset=['ペア総合スコア']), use_container_width=True)
             else:
