@@ -8,4 +8,5 @@ curl-cffi
 websockets
 cot_reports
 datetime
+japanize-matplotlib
 
