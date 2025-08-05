@@ -1,18 +1,19 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-import plotly.express as px
+import matplotlib.pyplot as plt
+import numpy as np # pandasやmatplotlibの内部でよく使われます
 from datetime import datetime, timedelta
 
 # --- Streamlit アプリの基本設定 ---
 st.set_page_config(
-    page_title="為替レート可視化アプリ",
+    page_title="為替レート可視化アプリ (Matplotlib版)",
     page_icon="💹",
     layout="wide"
 )
 
-st.title("💹 為替レート可視化アプリ")
-st.write("Yahooファイナンスからデータを取得し、為替レートの推移をグラフで表示します。")
+st.title("💹 為替レート可視化アプリ (Matplotlib版)")
+st.write("Yahooファイナンスからデータを取得し、matplotlibを使って為替レートの推移をグラフで表示します。")
 
 # --- サイドバーの設定 ---
 st.sidebar.header("設定")
@@ -30,8 +31,9 @@ selected_pair_name = st.sidebar.selectbox("為替ペアを選択してくださ�
 ticker = currency_pairs[selected_pair_name]
 
 # 期間の選択
-end_date = datetime.now()
-start_date = st.sidebar.date_input("開始日", end_date - timedelta(days=365))
+end_date = datetime.now().date() # .date() をつけて日付オブジェクトに
+start_date_default = end_date - timedelta(days=365)
+start_date = st.sidebar.date_input("開始日", start_date_default)
 end_date = st.sidebar.date_input("終了日", end_date)
 
 # 日付の整合性チェック
@@ -42,7 +44,8 @@ if start_date > end_date:
 # --- データ取得 ---
 # yfinanceを使って為替データを取得
 try:
-    data = yf.download(ticker, start=start_date, end=end_date)
+    # 終了日を翌日に設定して、当日分のデータを取得できるようにする
+    data = yf.download(ticker, start=start_date, end=end_date + timedelta(days=1))
 
     if data.empty:
         st.warning(f"{selected_pair_name} のデータが取得できませんでした。期間や為替ペアを確認してください。")
@@ -51,24 +54,35 @@ try:
     # --- メインコンテンツの表示 ---
     st.subheader(f"{selected_pair_name} の為替レート推移")
 
-    # Plotlyでインタラクティブなグラフを作成
-    fig = px.line(
-        data,
-        x=data.index,
-        y='Close',
-        title=f'{selected_pair_name} 終値の推移',
-        labels={'Close': '終値', 'index': '日付'}
-    )
-    fig.update_layout(
-        xaxis_title='日付',
-        yaxis_title='レート',
-        showlegend=True
-    )
-    st.plotly_chart(fig, use_container_width=True)
+    # Matplotlibでグラフを作成
+    # FigureとAxesオブジェクトを作成
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    # データをプロット
+    ax.plot(data.index, data['Close'], label='終値', color='royalblue')
+
+    # グラフのタイトルとラベルを設定
+    ax.set_title(f'{selected_pair_name} 終値の推移', fontsize=16)
+    ax.set_xlabel('日付', fontsize=12)
+    ax.set_ylabel('レート', fontsize=12)
+
+    # グリッド線を表示
+    ax.grid(True, linestyle='--', alpha=0.6)
+
+    # 凡例を表示
+    ax.legend()
+
+    # X軸の日付ラベルが見やすくなるように自動で回転させる
+    fig.autofmt_xdate()
+
+    # Streamlitにグラフを表示
+    st.pyplot(fig)
+
 
     # 取得したデータの表示
     st.subheader("取得データ")
+    # 小数点以下4桁で表示するようにスタイルを設定
     st.dataframe(data.style.format("{:.4f}"))
 
 except Exception as e:
-    st.error(f"データの取得中にエラーが発生しました: {e}")
+    st.error(f"データの取得または描画中にエラーが発生しました: {e}")
