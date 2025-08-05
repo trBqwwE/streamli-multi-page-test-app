@@ -45,24 +45,24 @@ try:
         auto_adjust=False
     )
 
-    # データが存在する場合のみ、前処理を実行
     if not data.empty:
-        # ★★★★★★★★★★★★★★★★★★★ 修正箇所 ★★★★★★★★★★★★★★★★★★★
-        # 2. 対象となるカラムのデータ型を強制的に数値に変換する処理を復活
-        #    変換できない値は NaN (Not a Number) になる (errors='coerce')
+        # 2. 対象となるカラムのデータ型を強制的に数値に変換
         cols_to_numeric = ['Open', 'High', 'Low', 'Close', 'Volume']
         for col in cols_to_numeric:
-            if col in data.columns: # 列が存在するか確認
+            if col in data.columns:
                 data[col] = pd.to_numeric(data[col], errors='coerce')
 
         # 3. NaNが含まれる行を削除する
         data.dropna(inplace=True)
-        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
-    # 前処理後にデータが空になった場合のチェック
     if data.empty:
         st.warning(f"指定された期間に有効なデータが存在しません。期間や為替ペアを再設定してください。")
         st.stop()
+    
+    # ★★★★★★★★★★★★★★★★ 修正箇所② (デバッグ情報) ★★★★★★★★★★★★★★★★
+    # グラフ描画前のデータ件数を表示
+    st.info(f"クリーニング後の有効なデータ件数: {len(data)}件")
+    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
 
     # --- メインコンテンツの表示 ---
     st.subheader(f"{selected_pair_name} のチャート")
@@ -76,11 +76,12 @@ try:
         ylabel='Price',
         volume=True,
         ylabel_lower='Volume',
-        mav=(5, 25),
+        # ★★★★★★★★★★★★★★★★ 修正箇所① (Mavを無効化) ★★★★★★★★★★★★★★
+        # mav=(5, 25), # 原因切り分けのため、移動平均線の描画を一時的にコメントアウト
+        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
         returnfig=True
     )
 
-    # figオブジェクトが正常に生成されたかを確認
     if fig:
         st.pyplot(fig)
     else:
