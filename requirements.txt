@@ -9,4 +9,5 @@ websockets
 cot_reports
 datetime
 japanize-matplotlib
+mplfinance
 
