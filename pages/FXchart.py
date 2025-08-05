@@ -35,20 +35,11 @@ def get_cot_index(series, lookback):
 
 def analyze_currency_pair(base_asset, quote_asset, all_cot_data):
     results = {}
-    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-    # --- 修正箇所①: インデックスに具体的な通貨名を使用 ---
-    # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
     for asset_name in [base_asset, quote_asset]:
         asset_df = all_cot_data[all_cot_data['Name'] == asset_name]
         if len(asset_df) < LOOKBACK_WEEKS: return None
         latest = asset_df.iloc[-1]
-        results[asset_name] = { # インデックスキーを通貨名に
-            "投機筋Net": latest['NonComm_Net'],
-            "投機筋Idx": get_cot_index(asset_df['NonComm_Net'], LOOKBACK_WEEKS).iloc[-1],
-            "実需筋Net": latest['Comm_Net'],
-            "実需筋Idx": get_cot_index(asset_df['Comm_Net'], LOOKBACK_WEEKS).iloc[-1],
-        }
-    
+        results[asset_name] = {"投機筋Net": latest['NonComm_Net'],"投機筋Idx": get_cot_index(asset_df['NonComm_Net'], LOOKBACK_WEEKS).iloc[-1],"実需筋Net": latest['Comm_Net'],"実需筋Idx": get_cot_index(asset_df['Comm_Net'], LOOKBACK_WEEKS).iloc[-1]}
     base_score, quote_score = results[base_asset]["投機筋Idx"], results[quote_asset]["投機筋Idx"]
     pair_score = base_score - quote_score
     df = pd.DataFrame(results).T
@@ -100,7 +91,31 @@ def main():
         fig = go.Figure(data=[go.Candlestick(x=price_data.index, open=price_data['Open'], high=price_data['High'], low=price_data['Low'], close=price_data['Close'], name='ローソク足')])
         fig.add_trace(go.Scatter(x=price_data.index, y=price_data['MA25'], mode='lines', name='25日移動平均線', line=dict(color='orange', width=1.5)))
         fig.add_trace(go.Scatter(x=price_data.index, y=price_data['MA75'], mode='lines', name='75日移動平均線', line=dict(color='purple', width=1.5)))
-        fig.update_layout(height=500, xaxis_rangeslider_visible=False, margin=dict(t=30, b=30), legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"))
+
+        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        # --- 修正箇所: 最新価格のラベル表示機能を復活 ---
+        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        annotations = []
+        if not price_data.empty:
+            latest_data = price_data.iloc[-1]
+            latest_date = price_data.index[-1]
+            
+            # 終値のラベル
+            annotations.append(dict(x=latest_date, y=latest_data.Close, text=f"{latest_data.Close:.3f}", showarrow=False, xanchor="left", xshift=5, font=dict(size=14, color="white"), bgcolor="rgba(0,0,139,0.8)", borderpad=4))
+            # MA25のラベル
+            if not pd.isna(latest_data.MA25):
+                annotations.append(dict(x=latest_date, y=latest_data.MA25, text=f"{latest_data.MA25:.3f}", showarrow=False, xanchor="left", xshift=5, font=dict(size=12, color="white"), bgcolor="rgba(255,165,0,0.8)", borderpad=3))
+            # MA75のラベル
+            if not pd.isna(latest_data.MA75):
+                annotations.append(dict(x=latest_date, y=latest_data.MA75, text=f"{latest_data.MA75:.3f}", showarrow=False, xanchor="left", xshift=5, font=dict(size=12, color="white"), bgcolor="rgba(128,0,128,0.8)", borderpad=3))
+        
+        fig.update_layout(
+            height=500, xaxis_rangeslider_visible=False, margin=dict(t=30, b=30), 
+            legend=dict(orientation="h", y=1.02, x=1, xanchor="right", yanchor="bottom"),
+            annotations=annotations # 作成したアノテーションを追加
+        )
+        # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+        
         st.plotly_chart(fig, use_container_width=True)
 
         st.header(f"COTペア分析: {standard_pair_name}")
@@ -111,14 +126,7 @@ def main():
             if analysis_df is not None:
                 st.info(f"**ペア総合スコア: {analysis_df.loc[base_asset_cot, 'ペア総合スコア']:.1f}** (正の値は {standard_base} が優勢、負の値は {standard_quote} が優勢を示唆)")
                 def style_score(val): return f'color: {"green" if val > 0 else "red"}' if isinstance(val, (int, float)) else ''
-                # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-                # --- 修正箇所②: フォーマットを新しいカラム名に合わせる ---
-                # ★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
-                st.dataframe(analysis_df.style.format({
-                    "投機筋Net": "{:,.0f}", "実需筋Net": "{:,.0f}",
-                    "投機筋Idx": "{:.1f}", "実需筋Idx": "{:.1f}",
-                    "ペア総合スコア": "{:.1f}"
-                }, na_rep="---").applymap(style_score, subset=['ペア総合スコア']), use_container_width=True)
+                st.dataframe(analysis_df.style.format({"投機筋Net": "{:,.0f}", "実需筋Net": "{:,.0f}", "投機筋Idx": "{:.1f}", "実需筋Idx": "{:.1f}", "ペア総合スコア": "{:.1f}"}, na_rep="---").applymap(style_score, subset=['ペア総合スコア']), use_container_width=True)
             else: st.warning("分析に必要なCOTデータが不足しています。")
         else: st.info("この為替ペアに対応する直接的なCOTデータはありません。")
 
