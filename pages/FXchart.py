@@ -1,18 +1,18 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-import plotly.graph_objects as go
 from datetime import datetime, timedelta
 
 # --- Streamlit アプリの基本設定 ---
 st.set_page_config(
-    page_title="為替レート ローソク足チャート (Plotly版)",
-    page_icon="✨",
+    page_title="【デバッグ用】データ調査アプリ",
+    page_icon="🔍",
     layout="wide"
 )
 
-st.title("✨ 為替レート ローソク足チャート (Plotly版)")
-st.write("Yahooファイナンスのデータに基づいた、インタラクティブなチャートです。")
+st.title("🔍【デバッグ用】データ調査アプリ")
+st.write("このアプリはグラフを描画せず、エラーの原因を特定するためにデータの内部を調査します。")
+st.info("お手数ですが、この画面に表示された内容をコピーし、ご返信いただけますでしょうか。")
 
 # --- サイドバー ---
 st.sidebar.header("設定")
@@ -20,97 +20,63 @@ currency_pairs = {
     "米ドル/円 (USD/JPY)": "JPY=X",
     "ユーロ/円 (EUR/JPY)": "EURJPY=X",
     "豪ドル/円 (AUD/JPY)": "AUDJPY=X",
-    "ポンド/円 (GBP/JPY)": "GBPJPY=X",
-    "ユーロ/米ドル (EUR/USD)": "EURUSD=X",
 }
 selected_pair_name = st.sidebar.selectbox("為替ペアを選択してください", list(currency_pairs.keys()))
 ticker = currency_pairs[selected_pair_name]
 
 end_date = datetime.now().date()
-start_date = st.sidebar.date_input("開始日", end_date - timedelta(days=180))
+start_date = st.sidebar.date_input("開始日", end_date - timedelta(days=30)) # 期間を短くして調査
 end_date = st.sidebar.date_input("終了日", end_date)
 
 if start_date > end_date:
     st.sidebar.error("エラー: 終了日は開始日より後の日付を選択してください。")
     st.stop()
 
-
-# --- データ取得とエラー処理 ---
+# --- データ取得と調査 ---
 try:
-    # 1. auto_adjust=False を指定して、'Open', 'High', 'Low', 'Close' 列を確実に取得
+    st.header("ステップ1: yfinanceからの生データ調査")
+    
+    # auto_adjust=False を指定してデータを取得
     raw_data = yf.download(
         ticker,
         start=start_date,
         end=end_date + timedelta(days=1),
         auto_adjust=False,
-        progress=False # ダウンロードの進捗表示をオフに
+        progress=False
     )
 
-    if raw_data.empty:
-        st.warning(f"指定された期間にデータが存在しません。")
+    if raw_data is None:
+        st.error("yf.downloadの結果が `None` でした。データが取得できていません。")
         st.stop()
+    
+    st.write("yfinanceから取得した直後のデータフレーム:")
+    st.dataframe(raw_data)
+    
+    st.write("yfinanceから取得した直後のデータフレーム情報 (`.info()`):")
+    st.text(raw_data.info())
 
-    # 2. 必要なカラムだけを明示的に抽出し、データ型を保証する
+
+    st.header("ステップ2: データクリーニング後の調査")
+
     required_columns = ['Open', 'High', 'Low', 'Close', 'Volume']
     data = raw_data[required_columns].copy()
+    
     for col in required_columns:
         data[col] = pd.to_numeric(data[col], errors='coerce')
 
-    # 3. 不正な行を削除
     data.dropna(inplace=True)
 
-    if data.empty:
-        st.warning(f"指定された期間に有効なデータが存在しませんでした（市場の休日など）。")
-        st.stop()
+    st.write("クリーニング後のデータフレーム:")
+    st.dataframe(data)
 
-    # --- メインコンテンツの表示 ---
-    st.subheader(f"{selected_pair_name} のチャート")
-
-    # 4. Plotlyでローソク足チャートを作成
-    fig = go.Figure()
-
-    # ローソク足の追加
-    fig.add_trace(go.Candlestick(
-        x=data.index,
-        open=data['Open'],
-        high=data['High'],
-        low=data['Low'],
-        close=data['Close'],
-        name='ローソク足'
-    ))
-
-    # 5日移動平均線の追加
-    if len(data) >= 5:
-        fig.add_trace(go.Scatter(
-            x=data.index,
-            y=data['Close'].rolling(window=5).mean(),
-            mode='lines', name='MA5 (5日移動平均線)',
-            line=dict(color='orange', width=1)
-        ))
-
-    # 25日移動平均線の追加
-    if len(data) >= 25:
-        fig.add_trace(go.Scatter(
-            x=data.index,
-            y=data['Close'].rolling(window=25).mean(),
-            mode='lines', name='MA25 (25日移動平均線)',
-            line=dict(color='purple', width=1)
-        ))
+    st.write("クリーニング後のデータフレーム情報 (`.info()`):")
+    st.text(data.info())
     
-    # グラフのレイアウト設定
-    fig.update_layout(
-        title_text=f'{selected_pair_name} 価格推移',
-        xaxis_title='日付',
-        yaxis_title='価格',
-        xaxis_rangeslider_visible=False, # 下部のレンジスライダーを非表示に
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1) # 凡例をグラフ上部に表示
-    )
+    st.header("最終確認")
+    st.success("ここまでの処理でエラーが発生しなければ、データ自体は正常に整形されています。")
+    st.write("もしこのメッセージが表示されているにも関わらず、元のコードでエラーが出る場合、Streamlit Cloudの環境自体に、こちらでは解決できない問題が存在する可能性が極めて高いです。")
 
-    # Streamlitにグラフを表示
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.subheader("取得データ")
-    st.dataframe(data.style.format("{:.4f}"))
 
 except Exception as e:
-    st.error(f"処理中に予期せぬエラーが発生しました: {e}")
+    st.error(f"処理の途中でエラーが発生しました。")
+    st.exception(e) # エラーの詳細情報を表示
