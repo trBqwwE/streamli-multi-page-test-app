@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 # import matplotlib.pyplot as plt
 
 # --- Streamlit アプリの基本設定 ---
-t.set_page_config(
+st.set_page_config(
     page_title="為替レート ローソク足チャート",
     page_icon="🕯️",
     layout="wide"
